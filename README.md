@@ -95,6 +95,10 @@ camel_sender_destroy(sender);
 
 This implementation is fully packet-level at the public API boundary. A typical integration uses a packet group to represent one video frame (or any application-defined aggregation unit), but the library itself only understands packets and groups.
 
+The sender is designed to work with a wide range of receivers:
+- If the receiver can provide full aggregate group feedback (including per-2KB interval received bytes), CAMEL runs in its strongest mode.
+- If the receiver only provides ACKs, the sender can synthesize a group sample and approximate interval loss shape from ACK coverage (degraded mode).
+
 ### 1) Sender side: record each transmitted packet
 
 For every packet you put on the wire, call:
@@ -116,9 +120,13 @@ For every received packet, call:
 camel_receiver_on_packet_received(receiver, group_id, transport_seq, payload_size, is_group_end);
 ```
 
-The receiver emits two feedback streams via callbacks:
+The built-in receiver emits two feedback streams via callbacks:
 - Packet-level ACK samples (`packet_ack_cb`) as `camel_transport_feedback_msg_t`
 - Group-level aggregate feedback (`group_feedback_cb`) as `camel_group_feedback_msg_t` when `is_group_end=1`
+
+If you use a different receiver implementation, you may provide:
+- ACK only (any of the supported ACK formats), and skip group feedback entirely
+- ACK + group feedback (best)
 
 ### 3) Sender side: consume ACK and aggregate feedback
 
@@ -129,9 +137,9 @@ camel_sender_on_packet_ack(sender, ack_payload, ack_size);
 camel_sender_on_group_feedback(sender, group_payload, group_size);
 ```
 
-The sender only produces a bandwidth/congestion sample when both are available for the same group:
-- First-packet RTT (from ACK) for the group’s first packet
-- Aggregate group feedback (receive time span + received bytes per 2KB interval)
+The sender can produce a bandwidth/congestion sample in two ways:
+- Strong mode (recommended): first-packet RTT + group feedback
+- Degraded mode: group ended + sufficient ACK coverage (synthetic group feedback)
 
 From these samples the sender updates:
 - bandwidth estimator (EWMA bandwidth + min-delay)
@@ -158,10 +166,22 @@ The delay signal uses the RTT of the first packet of each packet group. This req
 
 ### ACK requirements and batch ACK
 
-- Batch ACK is supported: one ACK message may contain multiple `transport_seq` samples (`sample_count > 1`).
-- Not every packet must be ACKed for correctness of parsing, but:
-  - The first packet of each group must be ACKed, otherwise that group will never produce a delay-based sample (it will be missing first-packet RTT).
-  - Inflight accounting only decreases when ACK samples are received; if you ACK too sparsely, inflight may remain artificially high and pacing/cwnd gating can become overly conservative.
+Batch ACK is supported in multiple formats:
+- Sample list (`camel_transport_feedback_msg_t`): one message may ACK multiple packets (`sample_count > 1`).
+- Cumulative ACK (`camel_cumack_msg_t`): ACKs all packets up to `largest_acked_seq` (within the sender’s history window).
+- ACK ranges (`camel_ack_ranges_msg_t`): ACKs multiple `[start_seq, end_seq]` ranges.
+
+ACK coverage recommendations:
+- The first packet of each group should be ACKed to produce the cleanest first-packet RTT signal.
+- If the first packet is not ACKed, the sender falls back to a degraded delay estimate (first ACKed packet in the group), and emits a warning by default.
+- Inflight accounting only decreases when ACKs are received; if you ACK too sparsely, inflight may remain artificially high and pacing/cwnd gating can become overly conservative.
+
+To feed non-sample-list ACK formats into the sender:
+
+```c
+camel_sender_on_cumulative_ack(sender, payload, size);
+camel_sender_on_ack_ranges(sender, payload, size);
+```
 
 ### How to packetize video frames
 
@@ -170,6 +190,12 @@ A practical mapping is:
 - Split the frame into MTU-sized packets (e.g., 1200-byte payload).
 - Set `is_group_end=1` on the last packet of that frame/group.
 - Use a monotonically increasing `transport_seq` across all outgoing packets.
+
+If you cannot mark the last packet, you can end the group explicitly from the sender side:
+
+```c
+camel_sender_end_group(sender, group_id);
+```
 
 ## Burst Length
 
@@ -223,6 +249,24 @@ If fallback is disabled but triggered, the sender enters a fatal state and stops
 
 See `doc/API.md` for complete API list.
 
+## Warnings (Optional)
+
+The sender can emit warnings when it enters degraded/compatibility paths (for example: synthesizing group feedback or missing first-packet ACK).
+
+```c
+camel_sender_set_warning_cb(sender, warning_cb, warning_ctx);
+```
+
+Warnings are enabled by default and can be disabled via:
+
+```c
+camel_sender_config_t cfg = {0};
+cfg.enable_warnings = 0;
+cfg.enable_synthetic_group_feedback = 1;
+cfg.enable_synthetic_interval_shape = 1;
+camel_sender_set_config(sender, &cfg);
+```
+
 ## Architecture
 
 ```
@@ -238,6 +282,29 @@ src/
 ```
 
 ## Testing
+
+## Citation
+
+If you use this codebase in academic work, please cite:
+
+```bibtex
+@inproceedings{10.1145/3774904.3792535,
+  author = {Liu, Liming and Jia, Zhidong and Jiang, Li and Zhang, Wei and Xie, Lan and Qian, Feng and Yan, Leju and Yan, Bing and Ma, Qiang and Sha, Zhou and Yang, Wei and Ban, Yixuan and Zhang, Xinggong},
+  title = {Camel: Frame-Level Bandwidth Estimation for Low-Latency Live Streaming under Video Bitrate Undershooting},
+  year = {2026},
+  isbn = {9798400723070},
+  publisher = {Association for Computing Machinery},
+  address = {New York, NY, USA},
+  url = {https://doi.org/10.1145/3774904.3792535},
+  doi = {10.1145/3774904.3792535},
+  booktitle = {Proceedings of the ACM Web Conference 2026},
+  pages = {5557--5567},
+  numpages = {11},
+  keywords = {low-latency live streaming, congestion control, frame-level control, large-scale deployment},
+  location = {United Arab Emirates},
+  series = {WWW '26}
+}
+```
 
 ```bash
 # Run all unit tests

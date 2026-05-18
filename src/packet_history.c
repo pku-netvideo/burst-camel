@@ -65,6 +65,7 @@ void camel_packet_history_add(camel_packet_history_t* h,
 	e->frame_offset_bytes = frame_offset_bytes;
 	e->payload_size = payload_size;
 	e->send_ts_us = send_ts_us;
+	e->acked = 0;
 }
 
 int camel_packet_history_get(const camel_packet_history_t* h,
@@ -87,3 +88,17 @@ int camel_packet_history_get(const camel_packet_history_t* h,
 	return 0;
 }
 
+int camel_packet_history_mark_acked(camel_packet_history_t* h, uint16_t transport_seq)
+{
+	if (h == NULL || h->entries == NULL || h->capacity == 0)
+		return -1;
+
+	uint32_t idx = (uint32_t)transport_seq % h->capacity;
+	camel_packet_history_entry_t* e = &h->entries[idx];
+	if (e->transport_seq != transport_seq)
+		return -1;
+	if (e->acked)
+		return 1;
+	e->acked = 1;
+	return 0;
+}

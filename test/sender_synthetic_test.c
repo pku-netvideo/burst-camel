@@ -11,6 +11,11 @@ typedef struct
 	int bitrate_calls;
 } camel_sender_capture_t;
 
+typedef struct
+{
+	int warnings;
+} camel_warning_capture_t;
+
 static uint64_t camel_test_sys_us(void)
 {
 	struct timespec ts;
@@ -34,6 +39,14 @@ static void test_pace_send(void* handler, uint32_t packet_id, int retrans, size_
 	(void)retrans;
 	(void)size;
 	(void)padding;
+}
+
+static void test_warning_cb(void* ctx, const char* code, const char* msg)
+{
+	camel_warning_capture_t* c = (camel_warning_capture_t*)ctx;
+	(void)code;
+	(void)msg;
+	c->warnings++;
 }
 
 static void test_app_predict(void* trigger, int32_t target_rate, double* ssim, double* pssim,
@@ -97,6 +110,79 @@ int test_sender_synthetic(void)
 
 	camel_bin_stream_destroy(&strm);
 	camel_sender_destroy(sender);
+
+	memset(&capture, 0, sizeof(capture));
+	{
+		camel_warning_capture_t wc;
+		camel_sender_config_t cfg;
+		memset(&wc, 0, sizeof(wc));
+		memset(&cfg, 0, sizeof(cfg));
+		cfg.enable_warnings = 1;
+		cfg.enable_synthetic_group_feedback = 1;
+		cfg.enable_synthetic_interval_shape = 1;
+		cfg.group_idle_timeout_ms = 0;
+		sender = camel_sender_create(&capture, test_bitrate_changed, NULL, test_pace_send, 0, 0, test_app_predict);
+		camel_sender_set_config(sender, &cfg);
+		camel_sender_set_warning_cb(sender, test_warning_cb, &wc);
+
+		camel_sender_on_packet_sent(sender, 30, 300, 1000, 0);
+		camel_sender_on_packet_sent(sender, 30, 301, 1000, 0);
+		camel_sender_on_packet_sent(sender, 30, 302, 1000, 1);
+
+		camel_bin_stream_init(&strm);
+		{
+			camel_cumack_msg_t ca;
+			memset(&ca, 0, sizeof(ca));
+			ca.largest_acked_seq = 300;
+			camel_cumack_msg_encode(&strm, &ca);
+			camel_sender_on_cumulative_ack(sender, strm.data, (int)strm.used);
+			ca.largest_acked_seq = 302;
+			camel_cumack_msg_encode(&strm, &ca);
+			camel_sender_on_cumulative_ack(sender, strm.data, (int)strm.used);
+		}
+
+		camel_sender_heartbeat(sender, 2000);
+		FCC_EXPECT_TRUE("synthetic path notifies bitrate", capture.bitrate > 0);
+		FCC_EXPECT_TRUE("synthetic path triggers warnings", (uint64_t)wc.warnings > 0ULL);
+		camel_bin_stream_destroy(&strm);
+		camel_sender_destroy(sender);
+	}
+
+	memset(&capture, 0, sizeof(capture));
+	{
+		camel_warning_capture_t wc;
+		camel_sender_config_t cfg;
+		memset(&wc, 0, sizeof(wc));
+		memset(&cfg, 0, sizeof(cfg));
+		cfg.enable_warnings = 0;
+		cfg.enable_synthetic_group_feedback = 1;
+		cfg.enable_synthetic_interval_shape = 1;
+
+		sender = camel_sender_create(&capture, test_bitrate_changed, NULL, test_pace_send, 0, 0, test_app_predict);
+		camel_sender_set_config(sender, &cfg);
+		camel_sender_set_warning_cb(sender, test_warning_cb, &wc);
+
+		camel_sender_on_packet_sent(sender, 40, 400, 1000, 0);
+		camel_sender_on_packet_sent(sender, 40, 401, 1000, 0);
+		camel_sender_on_packet_sent(sender, 40, 402, 1000, 1);
+
+		camel_bin_stream_init(&strm);
+		{
+			camel_ack_ranges_msg_t ar;
+			memset(&ar, 0, sizeof(ar));
+			ar.range_count = 1;
+			ar.ranges[0].start_seq = 400;
+			ar.ranges[0].end_seq = 402;
+			camel_ack_ranges_msg_encode(&strm, &ar);
+			camel_sender_on_ack_ranges(sender, strm.data, (int)strm.used);
+		}
+
+		camel_sender_heartbeat(sender, 3000);
+		FCC_EXPECT_TRUE("ranges ack notifies bitrate", capture.bitrate > 0);
+		FCC_EXPECT_EQ("warnings disabled", (uint64_t)wc.warnings, 0ULL);
+		camel_bin_stream_destroy(&strm);
+		camel_sender_destroy(sender);
+	}
 
 	memset(&capture, 0, sizeof(capture));
 	sender = camel_sender_create(&capture, test_bitrate_changed, NULL, test_pace_send, 0, 0, test_app_predict);

@@ -16,6 +16,7 @@ extern "C" {
 
 #define CAMEL_FEEDBACK_MAX_INTERVALS 64
 #define CAMEL_TRANSPORT_FEEDBACK_MAX_SAMPLES 128
+#define CAMEL_ACK_RANGES_MAX_RANGES 64
 
 typedef struct
 {
@@ -83,6 +84,29 @@ typedef struct
 
 void camel_transport_feedback_msg_encode(camel_bin_stream_t* strm, camel_transport_feedback_msg_t* msg);
 void camel_transport_feedback_msg_decode(camel_bin_stream_t* strm, camel_transport_feedback_msg_t* msg);
+
+typedef struct
+{
+	uint16_t largest_acked_seq;
+} camel_cumack_msg_t;
+
+void camel_cumack_msg_encode(camel_bin_stream_t* strm, camel_cumack_msg_t* msg);
+void camel_cumack_msg_decode(camel_bin_stream_t* strm, camel_cumack_msg_t* msg);
+
+typedef struct
+{
+	uint16_t start_seq;
+	uint16_t end_seq;
+} camel_ack_range_t;
+
+typedef struct
+{
+	uint16_t range_count;
+	camel_ack_range_t ranges[CAMEL_ACK_RANGES_MAX_RANGES];
+} camel_ack_ranges_msg_t;
+
+void camel_ack_ranges_msg_encode(camel_bin_stream_t* strm, camel_ack_ranges_msg_t* msg);
+void camel_ack_ranges_msg_decode(camel_bin_stream_t* strm, camel_ack_ranges_msg_t* msg);
 
 #ifdef __cplusplus
 }

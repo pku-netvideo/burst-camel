@@ -19,6 +19,16 @@ extern "C" {
 
 typedef struct camel_sender_t camel_sender_t;
 
+typedef void (*camel_sender_warning_cb)(void* ctx, const char* code, const char* msg);
+
+typedef struct
+{
+	int enable_warnings;
+	int enable_synthetic_group_feedback;
+	int enable_synthetic_interval_shape;
+	uint32_t group_idle_timeout_ms;
+} camel_sender_config_t;
+
 typedef struct
 {
 	uint32_t pacing_bitrate_bps;
@@ -45,6 +55,14 @@ camel_sender_t* camel_sender_create(void* trigger,
 	camel_app_layer_predict_func app_func);
 
 void camel_sender_destroy(camel_sender_t* s);
+
+void camel_sender_set_config(camel_sender_t* s, const camel_sender_config_t* cfg);
+void camel_sender_set_warning_cb(camel_sender_t* s, camel_sender_warning_cb cb, void* cb_ctx);
+
+void camel_sender_end_group(camel_sender_t* s, uint32_t group_id);
+
+void camel_sender_on_cumulative_ack(camel_sender_t* s, const uint8_t* payload, int payload_size);
+void camel_sender_on_ack_ranges(camel_sender_t* s, const uint8_t* payload, int payload_size);
 
 /*
  * Record a transmitted packet.

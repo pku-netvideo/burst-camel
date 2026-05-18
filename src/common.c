@@ -259,3 +259,39 @@ void camel_transport_feedback_msg_decode(camel_bin_stream_t* strm, camel_transpo
 		camel_mach_uint64_read(strm, &msg->samples[i].recv_ts_us);
 	}
 }
+
+void camel_cumack_msg_encode(camel_bin_stream_t* strm, camel_cumack_msg_t* msg)
+{
+	camel_bin_stream_rewind(strm, 1);
+	camel_mach_uint16_write(strm, msg->largest_acked_seq);
+}
+
+void camel_cumack_msg_decode(camel_bin_stream_t* strm, camel_cumack_msg_t* msg)
+{
+	memset(msg, 0, sizeof(*msg));
+	camel_mach_uint16_read(strm, &msg->largest_acked_seq);
+}
+
+void camel_ack_ranges_msg_encode(camel_bin_stream_t* strm, camel_ack_ranges_msg_t* msg)
+{
+	camel_bin_stream_rewind(strm, 1);
+	camel_mach_uint16_write(strm, msg->range_count);
+	for (uint32_t i = 0; i < (uint32_t)msg->range_count && i < CAMEL_ACK_RANGES_MAX_RANGES; i++) {
+		camel_mach_uint16_write(strm, msg->ranges[i].start_seq);
+		camel_mach_uint16_write(strm, msg->ranges[i].end_seq);
+	}
+}
+
+void camel_ack_ranges_msg_decode(camel_bin_stream_t* strm, camel_ack_ranges_msg_t* msg)
+{
+	uint16_t count;
+	memset(msg, 0, sizeof(*msg));
+	camel_mach_uint16_read(strm, &count);
+	if (count > CAMEL_ACK_RANGES_MAX_RANGES)
+		count = CAMEL_ACK_RANGES_MAX_RANGES;
+	msg->range_count = count;
+	for (uint32_t i = 0; i < (uint32_t)msg->range_count; i++) {
+		camel_mach_uint16_read(strm, &msg->ranges[i].start_seq);
+		camel_mach_uint16_read(strm, &msg->ranges[i].end_seq);
+	}
+}

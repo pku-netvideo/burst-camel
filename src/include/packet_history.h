@@ -20,6 +20,7 @@ typedef struct {
 	uint32_t	frame_offset_bytes;
 	uint32_t	payload_size;
 	uint64_t	send_ts_us;
+	uint8_t		acked;
 } camel_packet_history_entry_t;
 
 typedef struct {
@@ -42,9 +43,10 @@ int camel_packet_history_get(const camel_packet_history_t* h,
 	uint16_t transport_seq,
 	camel_packet_history_entry_t* out);
 
+int camel_packet_history_mark_acked(camel_packet_history_t* h, uint16_t transport_seq);
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif
-

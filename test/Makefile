@@ -1,17 +1,24 @@
-# Makefile for CAMEL-CC tests
-
 CC = gcc
-CFLAGS = -Wall -Wextra -I../src/include -g -O2
+CFLAGS = -Wall -Wextra -I../src/include -I. -g -O2
 LDFLAGS = -lm
+
+TEST_SOURCES = main.c \
+	test_framework.c \
+	bandwidth_estimator_test.c
+
+TEST_OBJECTS = bandwidth_estimator.o
 
 TEST_EXEC = fcc_unittest
 
 .PHONY: all clean test
 
-all: $(TEST_EXEC)
+all: $(TEST_OBJECTS) $(TEST_EXEC)
 
-$(TEST_EXEC): main.c test_framework.c test_framework.h
-	$(CC) $(CFLAGS) main.c test_framework.c -o $(TEST_EXEC) $(LDFLAGS)
+$(TEST_OBJECTS): ../src/bandwidth_estimator.c
+	$(CC) $(CFLAGS) -c ../src/bandwidth_estimator.c -o $@
+
+$(TEST_EXEC): $(TEST_SOURCES) $(TEST_OBJECTS)
+	$(CC) $(CFLAGS) $(TEST_SOURCES) $(TEST_OBJECTS) -o $(TEST_EXEC) $(LDFLAGS)
 
 test: $(TEST_EXEC)
 	./$(TEST_EXEC)

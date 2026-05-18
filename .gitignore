@@ -1,0 +1,36 @@
+# Compiled files
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+*.out
+*.app
+
+# Test executables
+fcc_unittest
+test_*
+
+# Logs
+*.log
+
+# Coverage
+*.gcov
+*.gcda
+*.gcno
+coverage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build directories
+build/
+dist/

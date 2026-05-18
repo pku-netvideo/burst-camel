@@ -333,7 +333,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 If you use this codebase in academic work, please cite:
 
 ```bibtex
-@inproceedings{10.1145/3774904.3792535,
+@inproceedings{burst-camel,
   author = {Liu, Liming and Jia, Zhidong and Jiang, Li and Zhang, Wei and Xie, Lan and Qian, Feng and Yan, Leju and Yan, Bing and Ma, Qiang and Sha, Zhou and Yang, Wei and Ban, Yixuan and Zhang, Xinggong},
   title = {Camel: Frame-Level Bandwidth Estimation for Low-Latency Live Streaming under Video Bitrate Undershooting},
   year = {2026},
@@ -348,11 +348,5 @@ If you use this codebase in academic work, please cite:
   keywords = {low-latency live streaming, congestion control, frame-level control, large-scale deployment},
   location = {United Arab Emirates},
   series = {WWW '26}
-}
-
-@misc{burst-camel,
-  title = {burst-camel: CAMEL-CC implementation},
-  howpublished = {\\url{https://gitlab.picpic.site/pic/burst-camel}},
-  year = {2026}
 }
 ```

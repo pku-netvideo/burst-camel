@@ -6,9 +6,10 @@ TEST_SOURCES = main.c \
 	test_framework.c \
 	bandwidth_estimator_test.c \
 	congestion_detector_test.c \
-	burst_controller_test.c
+	burst_controller_test.c \
+	feedback_test.c
 
-TEST_OBJECTS = bandwidth_estimator.o congestion_detector.o burst_controller.o
+TEST_OBJECTS = bandwidth_estimator.o congestion_detector.o burst_controller.o common.o
 
 TEST_EXEC = fcc_unittest
 
@@ -24,6 +25,9 @@ congestion_detector.o: ../src/congestion_detector.c
 
 burst_controller.o: ../src/burst_controller.c
 	$(CC) $(CFLAGS) -c ../src/burst_controller.c -o $@
+
+common.o: ../src/common.c
+	$(CC) $(CFLAGS) -c ../src/common.c -o $@
 
 $(TEST_EXEC): $(TEST_SOURCES) $(TEST_OBJECTS)
 	$(CC) $(CFLAGS) $(TEST_SOURCES) $(TEST_OBJECTS) -o $(TEST_EXEC) $(LDFLAGS)

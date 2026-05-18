@@ -9,7 +9,9 @@ TEST_SOURCES = main.c \
 	burst_controller_test.c \
 	feedback_test.c \
 	receiver_aggregation_test.c \
-	sender_synthetic_test.c
+	sender_synthetic_test.c \
+	network_simulator.c \
+	replay_test.c
 
 TEST_OBJECTS = bandwidth_estimator.o congestion_detector.o burst_controller.o common.o receiver.o sender.o
 

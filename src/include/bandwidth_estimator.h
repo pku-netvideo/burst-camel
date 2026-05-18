@@ -14,6 +14,8 @@
 extern "C" {
 #endif
 
+#define CAMEL_ESTIMATOR_MAX_DELAY_SAMPLES 128
+
 typedef struct {
     uint32_t    group_id;
     uint32_t    packet_count;
@@ -31,11 +33,19 @@ typedef struct {
     uint64_t    last_bandwidth_bps;
     uint32_t    valid_samples;
     double      ewma_alpha;
+    uint64_t    delay_samples_us[CAMEL_ESTIMATOR_MAX_DELAY_SAMPLES];
+    int64_t     delay_samples_ts_ms[CAMEL_ESTIMATOR_MAX_DELAY_SAMPLES];
+    uint32_t    delay_count;
+    uint32_t    delay_next_index;
+    uint32_t    delay_window_ms;
+    uint32_t    delay_window_size;
+    int         delay_window_by_samples;
 } camel_estimator_t;
 
 void        camel_estimator_init(camel_estimator_t* est, double ewma_alpha);
 void        camel_estimator_reset(camel_estimator_t* est);
-int         camel_estimator_add_sample(camel_estimator_t* est, const camel_frame_sample_t* sample);
+void        camel_estimator_set_delay_window(camel_estimator_t* est, int window_by_samples, uint32_t window_value);
+int         camel_estimator_add_sample(camel_estimator_t* est, const camel_frame_sample_t* sample, int64_t now_ts_ms);
 uint64_t    camel_estimator_get_bdp_bytes(const camel_estimator_t* est);
 uint64_t    camel_estimator_get_bandwidth(const camel_estimator_t* est);
 

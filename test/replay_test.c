@@ -21,7 +21,7 @@ static int test_constant_1mbps_undershoot(void)
     camel_network_simulator_add_synthetic_scenario(&net, 1000000, 50, 0.0, 64 * 1024);
 
     camel_estimator_init(&est, 0.1);
-    camel_congestion_detector_init(&det, 8, 0.5, 0.2);
+    camel_congestion_detector_init(&det, 1, 8, 0.5, 0.2);
 
     for (uint32_t i = 0; i < 60; i++) {
         uint32_t group_size = 4000;
@@ -43,8 +43,8 @@ static int test_constant_1mbps_undershoot(void)
             sample.last_recv_ts_us = evt->timestamp_us;
             sample.delay_us = 50000;
 
-            if (camel_estimator_add_sample(&est, &sample) == 0) {
-                (void)camel_congestion_detector_add_sample(&det, evt->recv_size, sample.delay_us);
+            if (camel_estimator_add_sample(&est, &sample, (int64_t)(now_us / 1000)) == 0) {
+                (void)camel_congestion_detector_add_sample(&det, evt->recv_size, sample.delay_us, (int64_t)(now_us / 1000));
             }
         }
         group_id++;

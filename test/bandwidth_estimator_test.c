@@ -8,6 +8,7 @@ static int test_basic_bandwidth_calculation(void)
     camel_estimator_t est;
     camel_group_sample_t sample;
     uint64_t bandwidth;
+    int64_t ts_ms = 0;
 
     printf("Test 1: Basic bandwidth calculation\n");
 
@@ -21,7 +22,7 @@ static int test_basic_bandwidth_calculation(void)
     sample.last_recv_ts_us = 1010000;
     sample.delay_us = 50000;
 
-    int ret = camel_estimator_add_sample(&est, &sample);
+    int ret = camel_estimator_add_sample(&est, &sample, ts_ms++);
     FCC_EXPECT_EQ("Sample added successfully", ret, 0);
 
     bandwidth = camel_estimator_get_bandwidth(&est);
@@ -39,6 +40,7 @@ static int test_bdp_calculation(void)
     camel_estimator_t est;
     camel_group_sample_t sample;
     uint64_t bdp;
+    int64_t ts_ms = 0;
 
     printf("Test 2: BDP calculation\n");
 
@@ -52,7 +54,7 @@ static int test_bdp_calculation(void)
     sample.last_recv_ts_us = 1010000;
     sample.delay_us = 50000;
 
-    (void)camel_estimator_add_sample(&est, &sample);
+    (void)camel_estimator_add_sample(&est, &sample, ts_ms++);
 
     bdp = camel_estimator_get_bdp_bytes(&est);
     printf("  Calculated BDP: %llu bytes\n", (unsigned long long)bdp);
@@ -66,6 +68,7 @@ static int test_invalid_samples(void)
     int failed = 0;
     camel_estimator_t est;
     camel_group_sample_t sample;
+    int64_t ts_ms = 0;
 
     printf("Test 3: Invalid sample rejection\n");
 
@@ -79,7 +82,7 @@ static int test_invalid_samples(void)
     sample.last_recv_ts_us = 1005000;
     sample.delay_us = 50000;
 
-    int ret = camel_estimator_add_sample(&est, &sample);
+    int ret = camel_estimator_add_sample(&est, &sample, ts_ms++);
     FCC_EXPECT_EQ("Single packet rejected", ret, -1);
 
     memset(&sample, 0, sizeof(sample));
@@ -90,7 +93,7 @@ static int test_invalid_samples(void)
     sample.last_recv_ts_us = 1000000;
     sample.delay_us = 50000;
 
-    ret = camel_estimator_add_sample(&est, &sample);
+    ret = camel_estimator_add_sample(&est, &sample, ts_ms++);
     FCC_EXPECT_EQ("Non-increasing timestamp rejected", ret, -1);
 
     FCC_EXPECT_EQ("No valid samples", est.valid_samples, 0);
@@ -103,6 +106,7 @@ static int test_min_delay_maintenance(void)
     int failed = 0;
     camel_estimator_t est;
     camel_group_sample_t sample;
+    int64_t ts_ms = 0;
 
     printf("Test 4: Minimum delay maintenance\n");
 
@@ -116,7 +120,7 @@ static int test_min_delay_maintenance(void)
     sample.last_recv_ts_us = 1010000;
     sample.delay_us = 50000;
 
-    (void)camel_estimator_add_sample(&est, &sample);
+    (void)camel_estimator_add_sample(&est, &sample, ts_ms++);
 
     memset(&sample, 0, sizeof(sample));
     sample.group_id = 2;
@@ -126,7 +130,7 @@ static int test_min_delay_maintenance(void)
     sample.last_recv_ts_us = 2010000;
     sample.delay_us = 60000;
 
-    (void)camel_estimator_add_sample(&est, &sample);
+    (void)camel_estimator_add_sample(&est, &sample, ts_ms++);
 
     memset(&sample, 0, sizeof(sample));
     sample.group_id = 3;
@@ -136,7 +140,7 @@ static int test_min_delay_maintenance(void)
     sample.last_recv_ts_us = 3010000;
     sample.delay_us = 40000;
 
-    (void)camel_estimator_add_sample(&est, &sample);
+    (void)camel_estimator_add_sample(&est, &sample, ts_ms++);
 
     FCC_EXPECT_EQ("Min delay is 40ms", est.min_delay_us, 40000);
 

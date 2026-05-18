@@ -88,6 +88,7 @@ int camel_burst_controller_maybe_update(camel_burst_controller_t* ctrl, uint64_t
 {
     uint32_t i;
     int has_excess_loss = 0;
+    int has_loss_above_l0 = 0;
     double base_loss;
     
     if (ctrl == NULL)
@@ -98,15 +99,27 @@ int camel_burst_controller_maybe_update(camel_burst_controller_t* ctrl, uint64_t
         return 0;
     
     ctrl->last_update_ts_ms = now_ts_ms;
-    base_loss = burst_loss_rate(&ctrl->intervals[0]);
+    base_loss = 0.0;
+    int base_set = 0;
+    for (i = 0; i < CAMEL_BURST_MAX_INTERVALS; i++) {
+        if (ctrl->intervals[i].sent == 0)
+            continue;
+        double loss = burst_loss_rate(&ctrl->intervals[i]);
+        if (!base_set || loss < base_loss) {
+            base_loss = loss;
+            base_set = 1;
+        }
+    }
     ctrl->last_excess_loss_interval = UINT32_MAX;
 
-    for (i = 1; i < CAMEL_BURST_MAX_INTERVALS; i++) {
+    for (i = 0; i < CAMEL_BURST_MAX_INTERVALS; i++) {
         double loss;
         if (ctrl->intervals[i].sent == 0)
             continue;
         
         loss = burst_loss_rate(&ctrl->intervals[i]);
+        if (loss > base_loss)
+            has_loss_above_l0 = 1;
         if (loss > base_loss + BURST_EXCESS_LOSS_THRESHOLD) {
             has_excess_loss = 1;
             ctrl->last_excess_loss_interval = i;
@@ -115,8 +128,10 @@ int camel_burst_controller_maybe_update(camel_burst_controller_t* ctrl, uint64_t
     }
     
     if (has_excess_loss) {
-        if (ctrl->current_burst_bytes <= ctrl->min_burst_bytes)
-            ctrl->fallback_mode = 1;
+        if (ctrl->current_burst_bytes <= ctrl->min_burst_bytes) {
+            ctrl->current_burst_bytes = ctrl->min_burst_bytes;
+            ctrl->fallback_mode = has_loss_above_l0 ? 1 : 0;
+        }
         else if (ctrl->current_burst_bytes - ctrl->min_burst_bytes < CAMEL_BURST_INTERVAL_BYTES)
             ctrl->current_burst_bytes = ctrl->min_burst_bytes;
         else

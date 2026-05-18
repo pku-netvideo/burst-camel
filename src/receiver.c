@@ -89,7 +89,7 @@ static void camel_receiver_emit_group_feedback(camel_receiver_t* r)
 {
 	if (r == NULL || r->group_feedback_cb == NULL)
 		return;
-	if (r->cur_group_id == 0 || r->packet_count == 0)
+	if (r->packet_count == 0)
 		return;
 
 	camel_receiver_packet_t sorted[CAMEL_RECEIVER_MAX_PACKETS];
@@ -103,8 +103,8 @@ static void camel_receiver_emit_group_feedback(camel_receiver_t* r)
 	memset(&msg, 0, sizeof(msg));
 	msg.group_id = r->cur_group_id;
 	msg.packet_count = count;
-	msg.first_recv_ts_us = r->first_recv_ts_us;
-	msg.last_recv_ts_us = r->last_recv_ts_us;
+	msg.first_recv_ts_us = sorted[0].recv_ts_us;
+	msg.last_recv_ts_us = sorted[count - 1].recv_ts_us;
 
 	uint64_t offset = 0;
 	msg.first_packet_size = sorted[0].payload_size;

@@ -273,8 +273,38 @@ camel_sender_config_t cfg = {0};
 cfg.enable_warnings = 0;
 cfg.enable_synthetic_group_feedback = 1;
 cfg.enable_synthetic_interval_shape = 1;
+cfg.congestion_window_by_samples = 0;
+cfg.congestion_window_value = 5000;
+cfg.min_delay_window_by_samples = 0;
+cfg.min_delay_window_value = 5000;
 camel_sender_set_config(sender, &cfg);
 ```
+
+## Window Configuration (Congestion + RTprop)
+
+The implementation supports two window modes for both:
+- congestion detection (regression over `(inflight_bytes, delay_us)`)
+- minimum delay tracking (RTprop approximation in `BDP = avg(B) * min(D)`)
+
+Parameters (in `camel_sender_config_t`):
+- `congestion_window_by_samples`:
+  - `0`: time window (default)
+  - `1`: sample-count window
+- `congestion_window_value`:
+  - when time window: milliseconds (default `5000`)
+  - when sample-count: number of samples
+- `min_delay_window_by_samples` / `min_delay_window_value`: same semantics as above (default `5000ms`)
+
+## Clock Semantics
+
+- Bandwidth reconstruction uses receiver-side timestamps carried in packet ACK samples (`recv_ts_us`), but only as a relative span `(t_last - t_first)`.
+- Delay (first-packet RTT) and fallback controller delay signals use sender-local time. No cross-machine clock synchronization is required.
+
+## Thread Model
+
+- Real-time mode starts an internal sender thread (`camel_sender_start`) which drives pacing and heartbeat.
+- The sender protects shared state with a mutex. The bitrate-change callback is invoked without holding the sender mutex.
+- The pacer protects its internal queue/budget with a mutex and does not hold the pacer mutex while invoking `send_cb`.
 
 ## Architecture
 

@@ -44,9 +44,14 @@ typedef struct
 	uint64_t first_send_ts_us;
 	uint64_t last_send_ts_us;
 	uint32_t acked_bytes;
+	uint32_t acked_bytes_excluding_first;
 	uint32_t acked_packets;
+	uint32_t acked_packets_with_recv_ts;
 	uint64_t first_acked_ts_us;
 	uint64_t last_acked_ts_us;
+	uint8_t recv_ts_domain;
+	uint64_t recv_ts_min_us;
+	uint64_t recv_ts_max_us;
 	uint32_t acked_interval_bytes[CAMEL_FEEDBACK_MAX_INTERVALS];
 	int valid;
 } camel_group_send_info_t;
@@ -110,11 +115,27 @@ struct camel_sender_t
 	pthread_t thread;
 	int thread_running;
 	int stop_thread;
+	pthread_mutex_t mu;
+	int mu_inited;
 
 	camel_sender_config_t cfg;
 	camel_sender_warning_cb warning_cb;
 	void* warning_ctx;
 };
+
+static void camel_sender_lock(camel_sender_t* s)
+{
+	if (s == NULL || !s->mu_inited)
+		return;
+	(void)pthread_mutex_lock(&s->mu);
+}
+
+static void camel_sender_unlock(camel_sender_t* s)
+{
+	if (s == NULL || !s->mu_inited)
+		return;
+	(void)pthread_mutex_unlock(&s->mu);
+}
 
 static uint32_t camel_sender_clamp_bitrate(camel_sender_t* s, uint32_t bitrate_bps)
 {
@@ -220,20 +241,38 @@ static void camel_sender_process_acked_seq(camel_sender_t* s, uint16_t transport
 	if (!s->groups[idx].valid || s->groups[idx].group_id != group_id)
 		return;
 
-	s->groups[idx].acked_bytes += e.payload_size;
-	s->groups[idx].acked_packets++;
-	if (s->groups[idx].first_acked_ts_us == 0)
-		s->groups[idx].first_acked_ts_us = ack_ts_us;
 	if (ack_ts_us <= s->groups[idx].last_acked_ts_us)
 		ack_ts_us = s->groups[idx].last_acked_ts_us + 1U;
+
+	s->groups[idx].acked_bytes += e.payload_size;
+	s->groups[idx].acked_packets++;
+	if (s->groups[idx].first_transport_seq != e.transport_seq)
+		s->groups[idx].acked_bytes_excluding_first += e.payload_size;
+	uint64_t sample_recv_ts_us = 0;
+	uint8_t sample_domain = 0;
+	if (has_recv_ts && recv_ts_us > 0) {
+		sample_recv_ts_us = recv_ts_us;
+		sample_domain = 1;
+	} else {
+		sample_recv_ts_us = ack_ts_us;
+		sample_domain = 2;
+	}
+	if (s->groups[idx].recv_ts_domain == 0)
+		s->groups[idx].recv_ts_domain = sample_domain;
+	if (s->groups[idx].recv_ts_domain == sample_domain) {
+		s->groups[idx].acked_packets_with_recv_ts++;
+		if (s->groups[idx].recv_ts_min_us == 0 || sample_recv_ts_us < s->groups[idx].recv_ts_min_us)
+			s->groups[idx].recv_ts_min_us = sample_recv_ts_us;
+		if (sample_recv_ts_us > s->groups[idx].recv_ts_max_us)
+			s->groups[idx].recv_ts_max_us = sample_recv_ts_us;
+	}
+	if (s->groups[idx].first_acked_ts_us == 0)
+		s->groups[idx].first_acked_ts_us = ack_ts_us;
 	s->groups[idx].last_acked_ts_us = ack_ts_us;
 	camel_sender_add_interval_bytes(s->groups[idx].acked_interval_bytes, e.frame_offset_bytes, e.payload_size);
 
-	if (!has_recv_ts)
-		recv_ts_us = ack_ts_us;
-
 	if (s->in_fallback) {
-		uint32_t target = camel_gcc_fallback_on_packet(&s->gcc_fallback, e.send_ts_us, recv_ts_us, e.payload_size);
+		uint32_t target = camel_gcc_fallback_on_packet(&s->gcc_fallback, e.send_ts_us, now_us, e.payload_size);
 		s->gcc_target_bitrate_bps = camel_sender_clamp_bitrate(s, target);
 		if (s->pacer != NULL)
 			camel_pacer_set_estimate_bitrate(s->pacer, s->gcc_target_bitrate_bps);
@@ -250,40 +289,46 @@ static void camel_sender_process_acked_seq(camel_sender_t* s, uint16_t transport
 	}
 }
 
-static void camel_sender_try_process_group_sample(camel_sender_t* s, uint32_t idx)
+static int camel_sender_try_process_group_sample(camel_sender_t* s, uint32_t idx)
 {
 	if (s == NULL)
-		return;
+		return 0;
 	if (!s->groups[idx].valid)
-		return;
-	if (!s->group_feedback[idx].valid)
-		return;
+		return 0;
 	if (!s->group_first_rtt_valid[idx])
-		return;
-	if (s->groups[idx].group_id != s->group_feedback[idx].group_id)
-		return;
+		return 0;
+	if (s->groups[idx].acked_packets_with_recv_ts < 2)
+		return 0;
+	if (s->groups[idx].recv_ts_max_us <= s->groups[idx].recv_ts_min_us)
+		return 0;
+	if (s->groups[idx].acked_bytes_excluding_first == 0)
+		return 0;
 
 	uint64_t delay_us = s->group_first_rtt_us[idx];
 	if (delay_us == 0)
 		delay_us = 1;
 
-	uint32_t sent_packet_count = s->groups[idx].sent_packet_count;
-	uint32_t sent_size = s->groups[idx].sent_size_bytes;
-	uint32_t first_packet_size = s->groups[idx].first_packet_size;
-
-	if (sent_packet_count >= 2 && sent_size > first_packet_size) {
+	if (s->groups[idx].acked_packets_with_recv_ts >= 2) {
 		camel_frame_sample_t sample;
 		memset(&sample, 0, sizeof(sample));
 		sample.group_id = s->groups[idx].group_id;
-		sample.packet_count = sent_packet_count;
-		sample.bytes_excluding_first = (uint64_t)(sent_size - first_packet_size);
-		sample.first_recv_ts_us = s->group_feedback[idx].first_recv_ts_us;
-		sample.last_recv_ts_us = s->group_feedback[idx].last_recv_ts_us;
+		sample.packet_count = s->groups[idx].acked_packets_with_recv_ts;
+		sample.bytes_excluding_first = (uint64_t)s->groups[idx].acked_bytes_excluding_first;
+		if (s->group_feedback[idx].valid &&
+			s->group_feedback[idx].group_id == s->groups[idx].group_id &&
+			s->group_feedback[idx].last_recv_ts_us > s->group_feedback[idx].first_recv_ts_us) {
+			sample.first_recv_ts_us = s->group_feedback[idx].first_recv_ts_us;
+			sample.last_recv_ts_us = s->group_feedback[idx].last_recv_ts_us;
+		} else {
+			sample.first_recv_ts_us = s->groups[idx].recv_ts_min_us;
+			sample.last_recv_ts_us = s->groups[idx].recv_ts_max_us;
+		}
 		sample.delay_us = delay_us;
 
-		if (camel_estimator_add_sample(&s->estimator, &sample) == 0) {
+		int64_t now_ts_ms = (int64_t)(camel_get_sys_us() / 1000ULL);
+		if (camel_estimator_add_sample(&s->estimator, &sample, now_ts_ms) == 0) {
 			camel_congestion_result_t result =
-				camel_congestion_detector_add_sample(&s->detector, s->inflight_bytes, sample.delay_us);
+				camel_congestion_detector_add_sample(&s->detector, s->inflight_bytes, sample.delay_us, now_ts_ms);
 			s->camel_gamma = result.gamma;
 			s->camel_last_slope_us_per_byte = result.slope_us_per_byte;
 			s->congestion_window_bytes = (size_t)((double)camel_estimator_get_bdp_bytes(&s->estimator) * result.gamma);
@@ -300,6 +345,7 @@ static void camel_sender_try_process_group_sample(camel_sender_t* s, uint32_t id
 
 	s->group_feedback[idx].valid = 0;
 	s->group_first_rtt_valid[idx] = 0;
+	return 1;
 }
 
 static void camel_sender_try_finalize_group(camel_sender_t* s, uint32_t idx)
@@ -309,11 +355,12 @@ static void camel_sender_try_finalize_group(camel_sender_t* s, uint32_t idx)
 	if (!s->groups[idx].valid)
 		return;
 
-	if (s->group_feedback[idx].valid && s->group_first_rtt_valid[idx]) {
-		camel_sender_try_process_group_sample(s, idx);
-		memset(&s->groups[idx], 0, sizeof(s->groups[idx]));
-		s->groups[idx].valid = 0;
-		return;
+	if (s->group_feedback[idx].valid) {
+		if (camel_sender_try_process_group_sample(s, idx)) {
+			memset(&s->groups[idx], 0, sizeof(s->groups[idx]));
+			s->groups[idx].valid = 0;
+			return;
+		}
 	}
 
 	if (!s->cfg.enable_synthetic_group_feedback)
@@ -328,22 +375,19 @@ static void camel_sender_try_finalize_group(camel_sender_t* s, uint32_t idx)
 		if (now_us - s->groups[idx].ended_ts_us < grace_us)
 			return;
 	}
-	if (s->groups[idx].acked_packets < 2)
+	if (s->groups[idx].acked_packets_with_recv_ts < 2)
 		return;
-	if (s->groups[idx].acked_bytes <= s->groups[idx].first_packet_size)
+	if (s->groups[idx].recv_ts_max_us <= s->groups[idx].recv_ts_min_us)
+		return;
+	if (s->groups[idx].acked_bytes_excluding_first == 0)
 		return;
 
 	uint64_t delay_us = 0;
 	if (s->group_first_rtt_valid[idx])
 		delay_us = s->group_first_rtt_us[idx];
 	else {
-		if (s->groups[idx].first_acked_ts_us > 0 && s->groups[idx].first_send_ts_us > 0)
-			delay_us = s->groups[idx].first_acked_ts_us > s->groups[idx].first_send_ts_us
-				? s->groups[idx].first_acked_ts_us - s->groups[idx].first_send_ts_us
-				: 1;
-		if (delay_us == 0)
-			delay_us = 1;
-		camel_sender_warn(s, "MISSING_FIRST_PACKET_ACK", "first packet not acked; using degraded delay");
+		camel_sender_warn(s, "MISSING_FIRST_PACKET_ACK", "first packet not acked; skipping delay");
+		return;
 	}
 
 	camel_sender_warn(s, "SYNTHETIC_GROUP_FEEDBACK", "using synthetic group feedback");
@@ -351,15 +395,16 @@ static void camel_sender_try_finalize_group(camel_sender_t* s, uint32_t idx)
 	camel_frame_sample_t sample;
 	memset(&sample, 0, sizeof(sample));
 	sample.group_id = s->groups[idx].group_id;
-	sample.packet_count = s->groups[idx].acked_packets;
-	sample.bytes_excluding_first = (uint64_t)(s->groups[idx].acked_bytes - s->groups[idx].first_packet_size);
-	sample.first_recv_ts_us = s->groups[idx].first_acked_ts_us;
-	sample.last_recv_ts_us = s->groups[idx].last_acked_ts_us;
+	sample.packet_count = s->groups[idx].acked_packets_with_recv_ts;
+	sample.bytes_excluding_first = (uint64_t)s->groups[idx].acked_bytes_excluding_first;
+	sample.first_recv_ts_us = s->groups[idx].recv_ts_min_us;
+	sample.last_recv_ts_us = s->groups[idx].recv_ts_max_us;
 	sample.delay_us = delay_us;
 
-	if (camel_estimator_add_sample(&s->estimator, &sample) == 0) {
+	int64_t now_ts_ms = (int64_t)(camel_get_sys_us() / 1000ULL);
+	if (camel_estimator_add_sample(&s->estimator, &sample, now_ts_ms) == 0) {
 		camel_congestion_result_t result =
-			camel_congestion_detector_add_sample(&s->detector, s->inflight_bytes, sample.delay_us);
+			camel_congestion_detector_add_sample(&s->detector, s->inflight_bytes, sample.delay_us, now_ts_ms);
 		s->camel_gamma = result.gamma;
 		s->camel_last_slope_us_per_byte = result.slope_us_per_byte;
 		s->congestion_window_bytes = (size_t)((double)camel_estimator_get_bdp_bytes(&s->estimator) * result.gamma);
@@ -410,6 +455,11 @@ camel_sender_t* camel_sender_create(void* trigger,
 	if (s == NULL)
 		return NULL;
 
+	if (pthread_mutex_init(&s->mu, NULL) == 0)
+		s->mu_inited = 1;
+	else
+		s->mu_inited = 0;
+
 	s->trigger = trigger;
 	s->trigger_cb = bitrate_cb;
 	s->handler = handler;
@@ -437,7 +487,11 @@ camel_sender_t* camel_sender_create(void* trigger,
 	s->cfg.enable_warnings = 1;
 	s->cfg.enable_synthetic_group_feedback = 1;
 	s->cfg.enable_synthetic_interval_shape = 1;
-	s->cfg.group_idle_timeout_ms = 5;
+	s->cfg.group_idle_timeout_ms = 50;
+	s->cfg.congestion_window_by_samples = 0;
+	s->cfg.congestion_window_value = 5000;
+	s->cfg.min_delay_window_by_samples = 0;
+	s->cfg.min_delay_window_value = 5000;
 	s->warning_cb = NULL;
 	s->warning_ctx = NULL;
 
@@ -450,7 +504,8 @@ camel_sender_t* camel_sender_create(void* trigger,
 	(void)camel_packet_history_init(&s->packet_history, 4096);
 
 	camel_estimator_init(&s->estimator, 0.1);
-	camel_congestion_detector_init(&s->detector, 8, 0.5, 0.2);
+	camel_estimator_set_delay_window(&s->estimator, s->cfg.min_delay_window_by_samples, s->cfg.min_delay_window_value);
+	camel_congestion_detector_init(&s->detector, s->cfg.congestion_window_by_samples, s->cfg.congestion_window_value, 0.5, 0.2);
 	camel_burst_controller_init(&s->burst_ctrl, 2048, 12 * 1024, 64 * 1024);
 
 	s->pacer = (camel_pacer_t*)calloc(1, sizeof(camel_pacer_t));
@@ -472,15 +527,21 @@ void camel_sender_set_config(camel_sender_t* s, const camel_sender_config_t* cfg
 {
 	if (s == NULL || cfg == NULL)
 		return;
+	camel_sender_lock(s);
 	s->cfg = *cfg;
+	camel_estimator_set_delay_window(&s->estimator, s->cfg.min_delay_window_by_samples, s->cfg.min_delay_window_value);
+	camel_congestion_detector_init(&s->detector, s->cfg.congestion_window_by_samples, s->cfg.congestion_window_value, 0.5, 0.2);
+	camel_sender_unlock(s);
 }
 
 void camel_sender_set_warning_cb(camel_sender_t* s, camel_sender_warning_cb cb, void* cb_ctx)
 {
 	if (s == NULL)
 		return;
+	camel_sender_lock(s);
 	s->warning_cb = cb;
 	s->warning_ctx = cb_ctx;
+	camel_sender_unlock(s);
 }
 
 static void camel_sender_stop_thread(camel_sender_t* s)
@@ -509,6 +570,10 @@ void camel_sender_destroy(camel_sender_t* s)
 		s->pacer = NULL;
 	}
 	camel_bin_stream_destroy(&s->strm);
+	if (s->mu_inited) {
+		(void)pthread_mutex_destroy(&s->mu);
+		s->mu_inited = 0;
+	}
 	free(s);
 }
 
@@ -520,6 +585,8 @@ void camel_sender_on_packet_sent(camel_sender_t* s,
 {
 	if (s == NULL || s->fatal_error)
 		return;
+
+	camel_sender_lock(s);
 
 	uint64_t now_us = camel_get_sys_us();
 	uint32_t idx = group_id % CAMEL_MAX_GROUP_NUM;
@@ -535,7 +602,9 @@ void camel_sender_on_packet_sent(camel_sender_t* s,
 	s->groups[idx].last_send_ts_us = now_us;
 
 	uint32_t offset = s->groups[idx].sent_size_bytes;
-	camel_packet_history_add(&s->packet_history, transport_seq, group_id, offset, (uint32_t)payload_size, now_us);
+	int ph_overwrite = camel_packet_history_add(&s->packet_history, transport_seq, group_id, offset, (uint32_t)payload_size, now_us);
+	if (ph_overwrite > 0)
+		camel_sender_warn(s, "PACKET_HISTORY_OVERWRITE", "packet history overwrite before ack");
 
 	if (s->groups[idx].sent_packet_count == 0) {
 		s->groups[idx].first_packet_size = (uint32_t)payload_size;
@@ -554,19 +623,25 @@ void camel_sender_on_packet_sent(camel_sender_t* s,
 			s->groups[idx].ended_ts_us = now_us;
 		camel_sender_try_finalize_group(s, idx);
 	}
+
+	camel_sender_unlock(s);
 }
 
 void camel_sender_end_group(camel_sender_t* s, uint32_t group_id)
 {
 	if (s == NULL || s->fatal_error)
 		return;
+	camel_sender_lock(s);
 	uint32_t idx = group_id % CAMEL_MAX_GROUP_NUM;
-	if (!s->groups[idx].valid || s->groups[idx].group_id != group_id)
+	if (!s->groups[idx].valid || s->groups[idx].group_id != group_id) {
+		camel_sender_unlock(s);
 		return;
+	}
 	s->groups[idx].ended = 1;
 	if (s->groups[idx].ended_ts_us == 0)
 		s->groups[idx].ended_ts_us = camel_get_sys_us();
 	camel_sender_try_finalize_group(s, idx);
+	camel_sender_unlock(s);
 }
 
 void camel_sender_on_packet_ack(camel_sender_t* s, const uint8_t* payload, int payload_size)
@@ -575,6 +650,8 @@ void camel_sender_on_packet_ack(camel_sender_t* s, const uint8_t* payload, int p
 		return;
 	if (payload == NULL || payload_size <= 0)
 		return;
+
+	camel_sender_lock(s);
 
 	if ((size_t)payload_size > s->strm.size) {
 		free(s->strm.data);
@@ -592,6 +669,8 @@ void camel_sender_on_packet_ack(camel_sender_t* s, const uint8_t* payload, int p
 	for (uint32_t i = 0; i < msg.sample_count; i++) {
 		camel_sender_process_acked_seq(s, msg.samples[i].transport_seq, msg.samples[i].recv_ts_us, 1);
 	}
+
+	camel_sender_unlock(s);
 }
 
 void camel_sender_on_cumulative_ack(camel_sender_t* s, const uint8_t* payload, int payload_size)
@@ -600,6 +679,8 @@ void camel_sender_on_cumulative_ack(camel_sender_t* s, const uint8_t* payload, i
 		return;
 	if (payload == NULL || payload_size <= 0)
 		return;
+
+	camel_sender_lock(s);
 
 	if ((size_t)payload_size > s->strm.size) {
 		free(s->strm.data);
@@ -614,16 +695,29 @@ void camel_sender_on_cumulative_ack(camel_sender_t* s, const uint8_t* payload, i
 	camel_cumack_msg_t msg;
 	camel_cumack_msg_decode(&s->strm, &msg);
 
-	uint16_t start = s->last_cumack_valid ? (uint16_t)(s->last_cumack_seq + 1U) : msg.largest_acked_seq;
 	if (!s->last_cumack_valid)
 		camel_sender_warn(s, "ACK_FORMAT_DEGRADED", "cumulative ACK without baseline; only acking largest_acked_seq");
 
 	uint32_t processed = 0;
-	for (uint32_t seq = start; seq <= msg.largest_acked_seq && processed < 4096; seq++, processed++)
-		camel_sender_process_acked_seq(s, (uint16_t)seq, 0, 0);
+	if (!s->last_cumack_valid) {
+		camel_sender_process_acked_seq(s, msg.largest_acked_seq, 0, 0);
+		processed = 1;
+	} else {
+		uint16_t last = s->last_cumack_seq;
+		uint16_t largest = msg.largest_acked_seq;
+		uint16_t dist = (uint16_t)(largest - last);
+		for (uint16_t i = 1; i <= dist && processed < 4096; i++, processed++) {
+			uint16_t seq = (uint16_t)(last + i);
+			camel_sender_process_acked_seq(s, seq, 0, 0);
+		}
+	}
+	if (processed >= 4096)
+		camel_sender_warn(s, "ACK_FORMAT_DEGRADED", "cumulative ACK truncated");
 
 	s->last_cumack_seq = msg.largest_acked_seq;
 	s->last_cumack_valid = 1;
+
+	camel_sender_unlock(s);
 }
 
 void camel_sender_on_ack_ranges(camel_sender_t* s, const uint8_t* payload, int payload_size)
@@ -632,6 +726,8 @@ void camel_sender_on_ack_ranges(camel_sender_t* s, const uint8_t* payload, int p
 		return;
 	if (payload == NULL || payload_size <= 0)
 		return;
+
+	camel_sender_lock(s);
 
 	if ((size_t)payload_size > s->strm.size) {
 		free(s->strm.data);
@@ -650,13 +746,19 @@ void camel_sender_on_ack_ranges(camel_sender_t* s, const uint8_t* payload, int p
 	for (uint32_t r = 0; r < msg.range_count && processed < 4096; r++) {
 		uint16_t start = msg.ranges[r].start_seq;
 		uint16_t end = msg.ranges[r].end_seq;
-		if (end < start)
-			continue;
-		for (uint32_t seq = start; seq <= end && processed < 4096; seq++, processed++)
-			camel_sender_process_acked_seq(s, (uint16_t)seq, 0, 0);
+		uint16_t seq = start;
+		while (processed < 4096) {
+			camel_sender_process_acked_seq(s, seq, 0, 0);
+			processed++;
+			if (seq == end)
+				break;
+			seq = (uint16_t)(seq + 1U);
+		}
 	}
 	if (processed >= 4096)
 		camel_sender_warn(s, "ACK_FORMAT_DEGRADED", "ack ranges truncated");
+
+	camel_sender_unlock(s);
 }
 
 void camel_sender_on_group_feedback(camel_sender_t* s, const uint8_t* payload, int payload_size)
@@ -665,6 +767,8 @@ void camel_sender_on_group_feedback(camel_sender_t* s, const uint8_t* payload, i
 		return;
 	if (payload == NULL || payload_size <= 0)
 		return;
+
+	camel_sender_lock(s);
 
 	if ((size_t)payload_size > s->strm.size) {
 		free(s->strm.data);
@@ -702,6 +806,7 @@ void camel_sender_on_group_feedback(camel_sender_t* s, const uint8_t* payload, i
 	if (s->burst_ctrl.fallback_mode && !s->in_fallback) {
 		if (!s->fallback_enabled) {
 			s->fatal_error = 1;
+			camel_sender_unlock(s);
 			return;
 		}
 		camel_gcc_fallback_init(&s->gcc_fallback, s->min_bitrate, s->max_bitrate,
@@ -728,17 +833,23 @@ void camel_sender_on_group_feedback(camel_sender_t* s, const uint8_t* payload, i
 	s->group_feedback[idx].valid = 1;
 
 	camel_sender_try_finalize_group(s, idx);
+
+	camel_sender_unlock(s);
 }
 
 void camel_sender_heartbeat(camel_sender_t* s, int64_t now_ts_ms)
 {
 	uint32_t camel_target_bps = 0;
 	int notify_camel = 0;
+	camel_bitrate_changed_func notify_cb = NULL;
+	void* notify_trigger = NULL;
 
 	if (s == NULL)
 		return;
 	if (s->fatal_error)
 		return;
+
+	camel_sender_lock(s);
 
 	(void)camel_burst_controller_maybe_update(&s->burst_ctrl, (uint64_t)now_ts_ms);
 
@@ -772,34 +883,49 @@ void camel_sender_heartbeat(camel_sender_t* s, int64_t now_ts_ms)
 		if (notify_camel) {
 			s->last_bitrate_bps = camel_target_bps;
 			s->notify_ts_ms = now_ts_ms;
+			notify_cb = s->trigger_cb;
+			notify_trigger = s->trigger;
 		}
-		if (notify_camel)
-			s->trigger_cb(s->trigger, camel_target_bps, 0, 0);
 		if (s->pacer != NULL)
 			camel_pacer_set_estimate_bitrate(s->pacer, camel_target_bps);
+		camel_sender_unlock(s);
+		if (notify_cb != NULL)
+			notify_cb(notify_trigger, camel_target_bps, 0, 0);
 		return;
 	}
+
+	camel_sender_unlock(s);
 }
 
 size_t camel_sender_get_burst_bytes(const camel_sender_t* s)
 {
 	if (s == NULL)
 		return 0;
-	return s->burst_ctrl.current_burst_bytes;
+	camel_sender_t* ss = (camel_sender_t*)s;
+	camel_sender_lock(ss);
+	size_t v = ss->burst_ctrl.current_burst_bytes;
+	camel_sender_unlock(ss);
+	return v;
 }
 
 int camel_sender_in_fallback(const camel_sender_t* s)
 {
 	if (s == NULL)
 		return 0;
-	return s->in_fallback != 0;
+	camel_sender_t* ss = (camel_sender_t*)s;
+	camel_sender_lock(ss);
+	int v = ss->in_fallback != 0;
+	camel_sender_unlock(ss);
+	return v;
 }
 
 void camel_sender_set_fallback_enabled(camel_sender_t* s, int enabled)
 {
 	if (s == NULL)
 		return;
+	camel_sender_lock(s);
 	s->fallback_enabled = enabled != 0;
+	camel_sender_unlock(s);
 }
 
 static void* camel_sender_thread_main(void* arg)

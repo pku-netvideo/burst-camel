@@ -46,9 +46,10 @@ void camel_packet_history_reset(camel_packet_history_t* h)
 	if (h == NULL || h->entries == NULL)
 		return;
 	memset(h->entries, 0, sizeof(camel_packet_history_entry_t) * h->capacity);
+	h->overwrote_unacked = 0;
 }
 
-void camel_packet_history_add(camel_packet_history_t* h,
+int camel_packet_history_add(camel_packet_history_t* h,
 	uint16_t transport_seq,
 	uint32_t frame_id,
 	uint32_t frame_offset_bytes,
@@ -56,16 +57,22 @@ void camel_packet_history_add(camel_packet_history_t* h,
 	uint64_t send_ts_us)
 {
 	if (h == NULL || h->entries == NULL || h->capacity == 0)
-		return;
+		return -1;
 
 	uint32_t idx = (uint32_t)transport_seq % h->capacity;
 	camel_packet_history_entry_t* e = &h->entries[idx];
+	int overwrote_unacked = 0;
+	if (e->payload_size > 0 && e->transport_seq != transport_seq && !e->acked) {
+		h->overwrote_unacked++;
+		overwrote_unacked = 1;
+	}
 	e->transport_seq = transport_seq;
 	e->frame_id = frame_id;
 	e->frame_offset_bytes = frame_offset_bytes;
 	e->payload_size = payload_size;
 	e->send_ts_us = send_ts_us;
 	e->acked = 0;
+	return overwrote_unacked;
 }
 
 int camel_packet_history_get(const camel_packet_history_t* h,

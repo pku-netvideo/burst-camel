@@ -27,6 +27,10 @@ typedef struct
 	int enable_synthetic_group_feedback;
 	int enable_synthetic_interval_shape;
 	uint32_t group_idle_timeout_ms;
+	int congestion_window_by_samples;
+	uint32_t congestion_window_value;
+	int min_delay_window_by_samples;
+	uint32_t min_delay_window_value;
 } camel_sender_config_t;
 
 typedef struct

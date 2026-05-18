@@ -26,13 +26,14 @@ typedef struct {
 typedef struct {
 	camel_packet_history_entry_t* entries;
 	uint32_t capacity;
+	uint64_t overwrote_unacked;
 } camel_packet_history_t;
 
 int camel_packet_history_init(camel_packet_history_t* h, uint32_t capacity);
 void camel_packet_history_destroy(camel_packet_history_t* h);
 void camel_packet_history_reset(camel_packet_history_t* h);
 
-void camel_packet_history_add(camel_packet_history_t* h,
+int camel_packet_history_add(camel_packet_history_t* h,
 	uint16_t transport_seq,
 	uint32_t frame_id,
 	uint32_t frame_offset_bytes,

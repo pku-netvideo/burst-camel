@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <pthread.h>
 
 #include "callbacks.h"
 
@@ -44,6 +45,8 @@ typedef struct camel_pacer_t
 
 	int64_t last_update_ts_ms;
 	int64_t budget_bytes;
+	pthread_mutex_t mu;
+	int mu_inited;
 } camel_pacer_t;
 
 int camel_pacer_init(camel_pacer_t* p, void* handler, camel_pace_send_func send_cb, uint32_t capacity);

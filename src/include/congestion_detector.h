@@ -18,6 +18,7 @@ extern "C" {
 typedef struct {
     uint64_t    inflight_bytes;
     uint64_t    delay_us;
+    int64_t     ts_ms;
 } camel_congestion_sample_t;
 
 typedef struct {
@@ -30,7 +31,9 @@ typedef struct {
     camel_congestion_sample_t samples[CAMEL_CONGESTION_DETECTOR_MAX_SAMPLES];
     uint32_t                  count;
     uint32_t                  next_index;
+    uint32_t                  window_ms;
     uint32_t                  window_size;
+    int                       window_by_samples;
     double                    threshold_us_per_byte;
     double                    gamma;
     double                    min_gamma;
@@ -38,10 +41,10 @@ typedef struct {
 } camel_congestion_detector_t;
 
 void camel_congestion_detector_init(camel_congestion_detector_t* det,
-    uint32_t window_size, double threshold_us_per_byte, double min_gamma);
+    int window_by_samples, uint32_t window_value, double threshold_us_per_byte, double min_gamma);
 void camel_congestion_detector_reset(camel_congestion_detector_t* det);
 camel_congestion_result_t camel_congestion_detector_add_sample(camel_congestion_detector_t* det,
-    uint64_t inflight_bytes, uint64_t delay_us);
+    uint64_t inflight_bytes, uint64_t delay_us, int64_t now_ts_ms);
 
 #ifdef __cplusplus
 }

@@ -15,6 +15,7 @@ extern "C" {
 #endif
 
 #define CAMEL_FEEDBACK_MAX_INTERVALS 64
+#define CAMEL_TRANSPORT_FEEDBACK_MAX_SAMPLES 128
 
 typedef struct
 {
@@ -37,6 +38,21 @@ void	camel_mach_uint64_read(camel_bin_stream_t* strm, uint64_t* val);
 
 typedef struct
 {
+	uint32_t group_id;
+	uint32_t group_size_bytes;
+	uint32_t packet_count;
+	uint32_t first_packet_size;
+	uint64_t first_recv_ts_us;
+	uint64_t last_recv_ts_us;
+	uint32_t interval_count;
+	uint32_t interval_received_bytes[CAMEL_FEEDBACK_MAX_INTERVALS];
+} camel_group_feedback_msg_t;
+
+void camel_group_feedback_msg_encode(camel_bin_stream_t* strm, camel_group_feedback_msg_t* msg);
+void camel_group_feedback_msg_decode(camel_bin_stream_t* strm, camel_group_feedback_msg_t* msg);
+
+typedef struct
+{
 	uint32_t frame_id;
 	size_t frame_size;
 	uint32_t packet_count;
@@ -52,6 +68,21 @@ typedef struct
 
 void camel_feedback_msg_encode(camel_bin_stream_t* strm, camel_feedback_msg_t* msg);
 void camel_feedback_msg_decode(camel_bin_stream_t* strm, camel_feedback_msg_t* msg);
+
+typedef struct
+{
+	uint16_t transport_seq;
+	uint64_t recv_ts_us;
+} camel_transport_feedback_sample_t;
+
+typedef struct
+{
+	uint16_t sample_count;
+	camel_transport_feedback_sample_t samples[CAMEL_TRANSPORT_FEEDBACK_MAX_SAMPLES];
+} camel_transport_feedback_msg_t;
+
+void camel_transport_feedback_msg_encode(camel_bin_stream_t* strm, camel_transport_feedback_msg_t* msg);
+void camel_transport_feedback_msg_decode(camel_bin_stream_t* strm, camel_transport_feedback_msg_t* msg);
 
 #ifdef __cplusplus
 }

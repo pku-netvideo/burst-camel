@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 #define MAX_PACKET_QUEUE 10000
-#define MAX_SENT_FRAMES 1000
+#define MAX_SENT_GROUPS 1000
 #define BURST_INTERVAL_BYTES 2048
 #define BURST_MAX_INTERVALS CAMEL_NETWORK_MAX_INTERVALS
 
@@ -18,8 +18,8 @@ void camel_network_simulator_init(camel_network_simulator_t* sim)
     sim->packet_queue = (camel_queued_packet_t*)calloc(MAX_PACKET_QUEUE, sizeof(camel_queued_packet_t));
     sim->queue_capacity = MAX_PACKET_QUEUE;
 
-    sim->sent_frames = (camel_sent_frame_t*)calloc(MAX_SENT_FRAMES, sizeof(camel_sent_frame_t));
-    sim->sent_frames_capacity = MAX_SENT_FRAMES;
+    sim->sent_groups = (camel_sent_group_t*)calloc(MAX_SENT_GROUPS, sizeof(camel_sent_group_t));
+    sim->sent_groups_capacity = MAX_SENT_GROUPS;
 
     sim->scenario.source = CAMEL_TRACE_SOURCE_SYNTHETIC;
     sim->scenario.trace_count = 0;
@@ -36,9 +36,9 @@ void camel_network_simulator_destroy(camel_network_simulator_t* sim)
         sim->packet_queue = NULL;
     }
 
-    if (sim->sent_frames) {
-        free(sim->sent_frames);
-        sim->sent_frames = NULL;
+    if (sim->sent_groups) {
+        free(sim->sent_groups);
+        sim->sent_groups = NULL;
     }
 
     if (sim->scenario.trace_states) {
@@ -166,9 +166,9 @@ void camel_network_simulator_update_time(camel_network_simulator_t* sim, uint64_
     }
 }
 
-int camel_network_simulator_send_frame(camel_network_simulator_t* sim,
-                                      uint32_t frame_id,
-                                      size_t frame_size,
+int camel_network_simulator_send_group(camel_network_simulator_t* sim,
+                                      uint32_t group_id,
+                                      size_t group_size,
                                       uint32_t packet_count,
                                       uint64_t send_ts_us)
 {
@@ -187,9 +187,9 @@ int camel_network_simulator_send_frame(camel_network_simulator_t* sim,
     sim->buffer_stats.max_buffer_bytes = max_buffer;
 
     for (i = 0; i < packet_count; i++) {
-        packet_size = (uint32_t)((i == 0) ? 200 : (frame_size - 200) / (packet_count - 1));
+        packet_size = (uint32_t)((i == 0) ? 200 : (group_size - 200) / (packet_count - 1));
         if (i == packet_count - 1)
-            packet_size = (uint32_t)(frame_size - bytes_sent);
+            packet_size = (uint32_t)(group_size - bytes_sent);
 
         if (sim->queue_size >= sim->queue_capacity)
             break;
@@ -214,27 +214,27 @@ int camel_network_simulator_send_frame(camel_network_simulator_t* sim,
         bytes_sent += packet_size;
     }
 
-    if (sim->sent_frames_count >= sim->sent_frames_capacity)
-        sim->sent_frames_count = 0;
+    if (sim->sent_groups_count >= sim->sent_groups_capacity)
+        sim->sent_groups_count = 0;
 
-    uint32_t frame_idx = sim->sent_frames_count % sim->sent_frames_capacity;
-    sim->sent_frames[frame_idx].frame_id = frame_id;
-    sim->sent_frames[frame_idx].send_ts_us = send_ts_us;
-    sim->sent_frames[frame_idx].size = (uint32_t)frame_size;
-    sim->sent_frames[frame_idx].packet_count = packet_count;
-    sim->sent_frames_count++;
+    uint32_t group_idx = sim->sent_groups_count % sim->sent_groups_capacity;
+    sim->sent_groups[group_idx].group_id = group_id;
+    sim->sent_groups[group_idx].send_ts_us = send_ts_us;
+    sim->sent_groups[group_idx].size = (uint32_t)group_size;
+    sim->sent_groups[group_idx].packet_count = packet_count;
+    sim->sent_groups_count++;
 
-    sim->total_sent_bytes += (uint32_t)frame_size;
-    sim->frame_count++;
+    sim->total_sent_bytes += (uint32_t)group_size;
+    sim->group_count++;
     sim->packet_count += packet_count;
 
     return 0;
 }
 
-camel_frame_event_t* camel_network_simulator_receive_frame(camel_network_simulator_t* sim,
+camel_group_event_t* camel_network_simulator_receive_group(camel_network_simulator_t* sim,
                                                         uint64_t now_ts_us)
 {
-    static camel_frame_event_t event;
+    static camel_group_event_t event;
     uint32_t capacity_bps;
     uint32_t base_delay_us;
     double loss_rate;
@@ -246,7 +246,7 @@ camel_frame_event_t* camel_network_simulator_receive_frame(camel_network_simulat
     uint64_t earliest_send_ts = UINT64_MAX;
     uint64_t latest_send_ts = 0;
 
-    if (sim == NULL || sim->sent_frames_count == 0)
+    if (sim == NULL || sim->sent_groups_count == 0)
         return NULL;
 
     memset(&event, 0, sizeof(event));
@@ -260,13 +260,13 @@ camel_frame_event_t* camel_network_simulator_receive_frame(camel_network_simulat
     if (transit_time_us < base_delay_us)
         transit_time_us = base_delay_us;
 
-    uint32_t frames_to_process = sim->sent_frames_count;
-    if (frames_to_process == 0)
+    uint32_t groups_to_process = sim->sent_groups_count;
+    if (groups_to_process == 0)
         return NULL;
 
-    for (uint32_t i = 0; i < frames_to_process && i < sim->sent_frames_capacity; i++) {
-        uint32_t frame_idx = (sim->sent_frames_count - frames_to_process + i) % sim->sent_frames_capacity;
-        camel_sent_frame_t* sent = &sim->sent_frames[frame_idx];
+    for (uint32_t i = 0; i < groups_to_process && i < sim->sent_groups_capacity; i++) {
+        uint32_t group_idx = (sim->sent_groups_count - groups_to_process + i) % sim->sent_groups_capacity;
+        camel_sent_group_t* sent = &sim->sent_groups[group_idx];
 
         if (sent->send_ts_us == 0)
             continue;
@@ -275,10 +275,10 @@ camel_frame_event_t* camel_network_simulator_receive_frame(camel_network_simulat
         if (expected_recv_ts > now_ts_us)
             continue;
 
-        event.frame_id = sent->frame_id;
+        event.group_id = sent->group_id;
         event.send_ts_us = sent->send_ts_us;
         event.first_send_ts_us = sent->send_ts_us;
-        event.frame_size = sent->size;
+        event.group_size = sent->size;
         event.packet_count = sent->packet_count;
         event.first_packet_size = 200;
 
@@ -322,7 +322,7 @@ camel_frame_event_t* camel_network_simulator_receive_frame(camel_network_simulat
         sim->total_received_bytes += recv_size;
         sim->total_lost_bytes += lost_size;
 
-        memset(&sim->sent_frames[frame_idx], 0, sizeof(camel_sent_frame_t));
+        memset(&sim->sent_groups[group_idx], 0, sizeof(camel_sent_group_t));
         break;
     }
 
@@ -342,7 +342,7 @@ void camel_network_simulator_get_stats(camel_network_simulator_t* sim,
     stats->total_sent_bytes = sim->total_sent_bytes;
     stats->total_received_bytes = sim->total_received_bytes;
     stats->total_lost_bytes = sim->total_lost_bytes;
-    stats->frame_count = sim->frame_count;
+    stats->group_count = sim->group_count;
     stats->packet_count = sim->packet_count;
     stats->buffer_stats = sim->buffer_stats;
 }
@@ -356,7 +356,7 @@ void camel_network_simulator_reset_stats(camel_network_simulator_t* sim)
     sim->total_sent_bytes = 0;
     sim->total_received_bytes = 0;
     sim->total_lost_bytes = 0;
-    sim->frame_count = 0;
+    sim->group_count = 0;
     sim->packet_count = 0;
 
     memset(&sim->buffer_stats, 0, sizeof(camel_router_buffer_stats_t));
@@ -364,7 +364,7 @@ void camel_network_simulator_reset_stats(camel_network_simulator_t* sim)
     sim->queue_size = 0;
     sim->queue_head = 0;
     sim->queue_tail = 0;
-    sim->sent_frames_count = 0;
+    sim->sent_groups_count = 0;
 }
 
 int camel_network_simulator_load_trace_file(camel_network_simulator_t* sim,
@@ -374,4 +374,3 @@ int camel_network_simulator_load_trace_file(camel_network_simulator_t* sim,
     (void)filename;
     return -1;
 }
-

@@ -15,13 +15,15 @@ extern "C" {
 #endif
 
 typedef struct {
-    uint32_t    frame_id;
+    uint32_t    group_id;
     uint32_t    packet_count;
     uint64_t    bytes_excluding_first;
     uint64_t    first_recv_ts_us;
     uint64_t    last_recv_ts_us;
     uint64_t    delay_us;
-} camel_frame_sample_t;
+} camel_group_sample_t;
+
+typedef camel_group_sample_t camel_frame_sample_t;
 
 typedef struct {
     double      avg_bandwidth_bps;

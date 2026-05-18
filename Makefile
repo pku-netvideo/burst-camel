@@ -1,7 +1,7 @@
 # Makefile for CAMEL-CC
 
 CC = gcc
-CFLAGS = -Wall -Wextra -I./src/include -g -O2
+CFLAGS = -Wall -Wextra -I./src/include -g -O2 -pthread
 LDFLAGS =
 
 # Directories

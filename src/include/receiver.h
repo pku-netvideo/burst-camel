@@ -18,27 +18,27 @@ extern "C" {
 
 typedef void (*camel_send_feedback_func)(void* handler, const uint8_t* payload, int payload_size);
 
-typedef struct
-{
-	void* handler;
-	camel_send_feedback_func send_cb;
+typedef struct camel_receiver_t camel_receiver_t;
 
-	camel_bin_stream_t strm;
-
-	uint32_t cur_frame_id;
-	uint32_t cur_frame_size;
-	uint32_t cur_frame_packet_count;
-	uint32_t cur_frame_first_packet_size;
-	uint32_t cur_frame_interval_count;
-	uint32_t cur_frame_interval_received_bytes[CAMEL_FEEDBACK_MAX_INTERVALS];
-	uint64_t first_ts;
-	uint64_t last_ts;
-} camel_receiver_t;
-
-camel_receiver_t* camel_receiver_create(void* handler, camel_send_feedback_func cb);
+/*
+ * Create a receiver instance.
+ * - group_feedback_cb: emits one aggregate feedback message when a packet group ends.
+ * - packet_ack_cb: emits packet-level ACK samples (transport feedback).
+ */
+camel_receiver_t* camel_receiver_create(void* handler,
+	camel_send_feedback_func group_feedback_cb,
+	camel_send_feedback_func packet_ack_cb);
 void camel_receiver_destroy(camel_receiver_t* r);
 
-void camel_receiver_on_received_frame_info(camel_receiver_t* r, uint32_t frame_id, size_t size);
+/*
+ * Feed one received packet to the receiver.
+ * Set is_group_end=1 for the last packet of the group.
+ */
+void camel_receiver_on_packet_received(camel_receiver_t* r,
+	uint32_t group_id,
+	uint16_t transport_seq,
+	size_t payload_size,
+	int is_group_end);
 
 #ifdef __cplusplus
 }

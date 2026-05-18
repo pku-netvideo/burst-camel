@@ -6,7 +6,7 @@ static int test_basic_bandwidth_calculation(void)
 {
     int failed = 0;
     camel_estimator_t est;
-    camel_frame_sample_t sample;
+    camel_group_sample_t sample;
     uint64_t bandwidth;
 
     printf("Test 1: Basic bandwidth calculation\n");
@@ -14,7 +14,7 @@ static int test_basic_bandwidth_calculation(void)
     camel_estimator_init(&est, 0.1);
 
     memset(&sample, 0, sizeof(sample));
-    sample.frame_id = 1;
+    sample.group_id = 1;
     sample.packet_count = 3;
     sample.bytes_excluding_first = 9000;
     sample.first_recv_ts_us = 1000000;
@@ -37,7 +37,7 @@ static int test_bdp_calculation(void)
 {
     int failed = 0;
     camel_estimator_t est;
-    camel_frame_sample_t sample;
+    camel_group_sample_t sample;
     uint64_t bdp;
 
     printf("Test 2: BDP calculation\n");
@@ -45,7 +45,7 @@ static int test_bdp_calculation(void)
     camel_estimator_init(&est, 0.1);
 
     memset(&sample, 0, sizeof(sample));
-    sample.frame_id = 1;
+    sample.group_id = 1;
     sample.packet_count = 3;
     sample.bytes_excluding_first = 9000;
     sample.first_recv_ts_us = 1000000;
@@ -65,14 +65,14 @@ static int test_invalid_samples(void)
 {
     int failed = 0;
     camel_estimator_t est;
-    camel_frame_sample_t sample;
+    camel_group_sample_t sample;
 
     printf("Test 3: Invalid sample rejection\n");
 
     camel_estimator_init(&est, 0.1);
 
     memset(&sample, 0, sizeof(sample));
-    sample.frame_id = 1;
+    sample.group_id = 1;
     sample.packet_count = 1;
     sample.bytes_excluding_first = 1000;
     sample.first_recv_ts_us = 1000000;
@@ -83,7 +83,7 @@ static int test_invalid_samples(void)
     FCC_EXPECT_EQ("Single packet rejected", ret, -1);
 
     memset(&sample, 0, sizeof(sample));
-    sample.frame_id = 2;
+    sample.group_id = 2;
     sample.packet_count = 3;
     sample.bytes_excluding_first = 1000;
     sample.first_recv_ts_us = 1000000;
@@ -102,14 +102,14 @@ static int test_min_delay_maintenance(void)
 {
     int failed = 0;
     camel_estimator_t est;
-    camel_frame_sample_t sample;
+    camel_group_sample_t sample;
 
     printf("Test 4: Minimum delay maintenance\n");
 
     camel_estimator_init(&est, 0.1);
 
     memset(&sample, 0, sizeof(sample));
-    sample.frame_id = 1;
+    sample.group_id = 1;
     sample.packet_count = 3;
     sample.bytes_excluding_first = 9000;
     sample.first_recv_ts_us = 1000000;
@@ -119,7 +119,7 @@ static int test_min_delay_maintenance(void)
     (void)camel_estimator_add_sample(&est, &sample);
 
     memset(&sample, 0, sizeof(sample));
-    sample.frame_id = 2;
+    sample.group_id = 2;
     sample.packet_count = 3;
     sample.bytes_excluding_first = 9000;
     sample.first_recv_ts_us = 2000000;
@@ -129,7 +129,7 @@ static int test_min_delay_maintenance(void)
     (void)camel_estimator_add_sample(&est, &sample);
 
     memset(&sample, 0, sizeof(sample));
-    sample.frame_id = 3;
+    sample.group_id = 3;
     sample.packet_count = 3;
     sample.bytes_excluding_first = 9000;
     sample.first_recv_ts_us = 3000000;

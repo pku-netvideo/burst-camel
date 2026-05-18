@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <time.h>
 
+#define CAMEL_RECEIVER_MAX_PACKETS 2048
+
 static uint64_t camel_get_sys_us(void)
 {
 	struct timespec ts;
@@ -28,72 +30,161 @@ static uint64_t camel_max_u64(uint64_t a, uint64_t b)
 	return a > b ? a : b;
 }
 
-static size_t camel_min_size(size_t a, size_t b)
+typedef struct
 {
-	return a < b ? a : b;
+	uint16_t transport_seq;
+	uint32_t payload_size;
+	uint64_t recv_ts_us;
+} camel_receiver_packet_t;
+
+struct camel_receiver_t
+{
+	void* handler;
+	camel_send_feedback_func group_feedback_cb;
+	camel_send_feedback_func packet_ack_cb;
+
+	camel_bin_stream_t strm;
+
+	uint32_t cur_group_id;
+	camel_receiver_packet_t packets[CAMEL_RECEIVER_MAX_PACKETS];
+	uint32_t packet_count;
+	uint64_t first_recv_ts_us;
+	uint64_t last_recv_ts_us;
+};
+
+static int camel_receiver_packet_seq_comp(const void* a, const void* b)
+{
+	const camel_receiver_packet_t* p1 = (const camel_receiver_packet_t*)a;
+	const camel_receiver_packet_t* p2 = (const camel_receiver_packet_t*)b;
+	if (p1->transport_seq < p2->transport_seq)
+		return -1;
+	if (p1->transport_seq > p2->transport_seq)
+		return 1;
+	return 0;
 }
 
-static uint32_t camel_max_u32(uint32_t a, uint32_t b)
+static void camel_receiver_reset_group(camel_receiver_t* r, uint32_t group_id)
 {
-	return a > b ? a : b;
+	r->cur_group_id = group_id;
+	r->packet_count = 0;
+	r->first_recv_ts_us = 0;
+	r->last_recv_ts_us = 0;
 }
 
-static void camel_receiver_record_interval_bytes(camel_receiver_t* r, size_t frame_offset, size_t size)
+static void camel_receiver_send_packet_ack(camel_receiver_t* r, uint16_t transport_seq, uint64_t recv_ts_us)
 {
-	while (size > 0) {
-		uint32_t interval = (uint32_t)(frame_offset / CAMEL_BURST_INTERVAL_BYTES);
-		size_t interval_end = ((size_t)interval + 1) * CAMEL_BURST_INTERVAL_BYTES;
-		size_t bytes = camel_min_size(size, interval_end - frame_offset);
+	if (r == NULL || r->packet_ack_cb == NULL)
+		return;
 
-		if (interval >= CAMEL_FEEDBACK_MAX_INTERVALS)
-			break;
+	camel_transport_feedback_msg_t msg;
+	memset(&msg, 0, sizeof(msg));
+	msg.sample_count = 1;
+	msg.samples[0].transport_seq = transport_seq;
+	msg.samples[0].recv_ts_us = recv_ts_us;
+	camel_transport_feedback_msg_encode(&r->strm, &msg);
+	r->packet_ack_cb(r->handler, r->strm.data, (int)r->strm.used);
+}
 
-		r->cur_frame_interval_received_bytes[interval] += (uint32_t)bytes;
-		r->cur_frame_interval_count = camel_max_u32(r->cur_frame_interval_count, interval + 1);
-		frame_offset += bytes;
-		size -= bytes;
+static void camel_receiver_emit_group_feedback(camel_receiver_t* r)
+{
+	if (r == NULL || r->group_feedback_cb == NULL)
+		return;
+	if (r->cur_group_id == 0 || r->packet_count == 0)
+		return;
+
+	camel_receiver_packet_t sorted[CAMEL_RECEIVER_MAX_PACKETS];
+	uint32_t count = r->packet_count;
+	if (count > CAMEL_RECEIVER_MAX_PACKETS)
+		count = CAMEL_RECEIVER_MAX_PACKETS;
+	memcpy(sorted, r->packets, sizeof(camel_receiver_packet_t) * count);
+	qsort(sorted, (size_t)count, sizeof(camel_receiver_packet_t), camel_receiver_packet_seq_comp);
+
+	camel_group_feedback_msg_t msg;
+	memset(&msg, 0, sizeof(msg));
+	msg.group_id = r->cur_group_id;
+	msg.packet_count = count;
+	msg.first_recv_ts_us = r->first_recv_ts_us;
+	msg.last_recv_ts_us = r->last_recv_ts_us;
+
+	uint64_t offset = 0;
+	msg.first_packet_size = sorted[0].payload_size;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t size = sorted[i].payload_size;
+		while (size > 0) {
+			uint32_t interval = (uint32_t)(offset / CAMEL_BURST_INTERVAL_BYTES);
+			uint64_t interval_end = ((uint64_t)interval + 1) * (uint64_t)CAMEL_BURST_INTERVAL_BYTES;
+			uint32_t bytes = (uint32_t)((uint64_t)size < interval_end - offset ? (uint64_t)size : interval_end - offset);
+			if (interval >= CAMEL_FEEDBACK_MAX_INTERVALS) {
+				size = 0;
+				break;
+			}
+			msg.interval_received_bytes[interval] += bytes;
+			uint32_t next_count = interval + 1;
+			if (next_count > msg.interval_count)
+				msg.interval_count = next_count;
+			offset += bytes;
+			size -= bytes;
+		}
 	}
+	msg.group_size_bytes = (uint32_t)offset;
+
+	camel_group_feedback_msg_encode(&r->strm, &msg);
+	r->group_feedback_cb(r->handler, r->strm.data, (int)r->strm.used);
 }
 
-static void camel_receiver_fill_feedback(camel_receiver_t* r, camel_feedback_msg_t* msg)
-{
-	memset(msg, 0, sizeof(*msg));
-	msg->frame_id = r->cur_frame_id;
-	msg->frame_size = r->cur_frame_size;
-	msg->packet_count = r->cur_frame_packet_count;
-	msg->first_packet_size = r->cur_frame_first_packet_size;
-	msg->first_ts = r->first_ts;
-	msg->last_ts = r->last_ts;
-	msg->feedback_send_ts_us = camel_get_sys_us();
-	msg->interval_count = r->cur_frame_interval_count;
-	memcpy(msg->interval_received_bytes, r->cur_frame_interval_received_bytes,
-		sizeof(uint32_t) * msg->interval_count);
-}
-
-static void camel_receiver_reset_frame_stats(camel_receiver_t* r, uint32_t frame_id, size_t size, uint64_t cur_ts)
-{
-	memset(r->cur_frame_interval_received_bytes, 0, sizeof(r->cur_frame_interval_received_bytes));
-	r->cur_frame_id = frame_id;
-	r->cur_frame_size = 0;
-	r->cur_frame_interval_count = 0;
-	camel_receiver_record_interval_bytes(r, r->cur_frame_size, size);
-	r->cur_frame_size = (uint32_t)size;
-	r->cur_frame_packet_count = 1;
-	r->cur_frame_first_packet_size = (uint32_t)size;
-	r->first_ts = cur_ts;
-	r->last_ts = cur_ts;
-}
-
-camel_receiver_t* camel_receiver_create(void* handler, camel_send_feedback_func cb)
+camel_receiver_t* camel_receiver_create(void* handler,
+	camel_send_feedback_func group_feedback_cb,
+	camel_send_feedback_func packet_ack_cb)
 {
 	camel_receiver_t* r = (camel_receiver_t*)calloc(1, sizeof(camel_receiver_t));
 	if (r == NULL)
 		return NULL;
 
 	r->handler = handler;
-	r->send_cb = cb;
-	camel_bin_stream_init(&r->strm);
+	r->group_feedback_cb = group_feedback_cb;
+	r->packet_ack_cb = packet_ack_cb;
+	(void)camel_bin_stream_init(&r->strm);
+	camel_receiver_reset_group(r, 0);
 	return r;
+}
+
+void camel_receiver_on_packet_received(camel_receiver_t* r,
+	uint32_t group_id,
+	uint16_t transport_seq,
+	size_t payload_size,
+	int is_group_end)
+{
+	uint64_t cur_ts = camel_get_sys_us();
+
+	if (r == NULL)
+		return;
+
+	if (r->cur_group_id == 0) {
+		camel_receiver_reset_group(r, group_id);
+	} else if (r->cur_group_id != group_id) {
+		camel_receiver_emit_group_feedback(r);
+		camel_receiver_reset_group(r, group_id);
+	}
+
+	camel_receiver_send_packet_ack(r, transport_seq, cur_ts);
+
+	if (r->packet_count < CAMEL_RECEIVER_MAX_PACKETS) {
+		r->packets[r->packet_count].transport_seq = transport_seq;
+		r->packets[r->packet_count].payload_size = (uint32_t)payload_size;
+		r->packets[r->packet_count].recv_ts_us = cur_ts;
+		r->packet_count++;
+	}
+
+	if (r->first_recv_ts_us == 0)
+		r->first_recv_ts_us = cur_ts;
+	else
+		r->first_recv_ts_us = camel_min_u64(r->first_recv_ts_us, cur_ts);
+	r->last_recv_ts_us = camel_max_u64(r->last_recv_ts_us, cur_ts);
+
+	if (is_group_end) {
+		camel_receiver_emit_group_feedback(r);
+		camel_receiver_reset_group(r, 0);
+	}
 }
 
 void camel_receiver_destroy(camel_receiver_t* r)
@@ -102,39 +193,4 @@ void camel_receiver_destroy(camel_receiver_t* r)
 		return;
 	camel_bin_stream_destroy(&r->strm);
 	free(r);
-}
-
-void camel_receiver_on_received_frame_info(camel_receiver_t* r, uint32_t frame_id, size_t size)
-{
-	uint64_t cur_ts = camel_get_sys_us();
-
-	if (r == NULL)
-		return;
-
-	if (r->cur_frame_id == 0) {
-		r->cur_frame_id = frame_id;
-		r->cur_frame_size = 0;
-		camel_receiver_record_interval_bytes(r, r->cur_frame_size, size);
-		r->cur_frame_size += (uint32_t)size;
-		r->cur_frame_packet_count = 1;
-		r->cur_frame_first_packet_size = (uint32_t)size;
-		r->first_ts = cur_ts;
-		r->last_ts = camel_max_u64(r->last_ts, cur_ts);
-	}
-	else if (r->cur_frame_id < frame_id) {
-		camel_feedback_msg_t msg;
-		camel_receiver_fill_feedback(r, &msg);
-		if (r->send_cb != NULL) {
-			camel_feedback_msg_encode(&r->strm, &msg);
-			r->send_cb(r->handler, r->strm.data, (int)r->strm.used);
-		}
-		camel_receiver_reset_frame_stats(r, frame_id, size, cur_ts);
-	}
-	else if (r->cur_frame_id == frame_id) {
-		camel_receiver_record_interval_bytes(r, r->cur_frame_size, size);
-		r->cur_frame_size = r->cur_frame_size + (uint32_t)size;
-		r->cur_frame_packet_count++;
-		r->first_ts = camel_min_u64(r->first_ts, cur_ts);
-		r->last_ts = camel_max_u64(r->last_ts, cur_ts);
-	}
 }

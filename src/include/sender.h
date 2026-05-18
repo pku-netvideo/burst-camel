@@ -10,57 +10,32 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "bandwidth_estimator.h"
-#include "congestion_detector.h"
-#include "burst_controller.h"
+#include "callbacks.h"
 #include "common.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef void (*camel_bitrate_changed_func)(void* trigger, uint32_t bitrate, uint8_t fraction_loss, uint32_t rtt);
-typedef void (*camel_pace_send_func)(void* handler, uint32_t packet_id, int retrans, size_t size, int padding);
-typedef void (*camel_app_layer_predict_func)(void* trigger, int32_t target_rate, double* ssim, double* pssim,
-	double* size_u, double* size_sigma2);
-
-#define CAMEL_MAX_FRAME_NUM 1024
+typedef struct camel_sender_t camel_sender_t;
 
 typedef struct
 {
-	uint32_t frame_id[CAMEL_MAX_FRAME_NUM];
-	uint64_t frame_send_ts[CAMEL_MAX_FRAME_NUM];
-	size_t   frame_size[CAMEL_MAX_FRAME_NUM];
-} camel_frame_info_t;
-
-typedef struct
-{
-	void* trigger;
-	camel_bitrate_changed_func trigger_cb;
-	void* handler;
-	camel_pace_send_func send_cb;
-	camel_app_layer_predict_func app_func;
-
-	uint32_t last_bitrate_bps;
-	int64_t notify_ts_ms;
-
-	uint32_t max_bitrate;
-	uint32_t min_bitrate;
-
-	camel_bin_stream_t strm;
-
-	camel_frame_info_t fit;
-	camel_estimator_t estimator;
-	camel_congestion_detector_t detector;
-	camel_burst_controller_t burst_ctrl;
-
+	uint32_t pacing_bitrate_bps;
+	uint32_t min_pacing_bitrate_bps;
 	size_t congestion_window_bytes;
-	uint32_t camel_target_bitrate_bps;
-	double camel_gamma;
-	double camel_last_slope_us_per_byte;
-	uint64_t inflight_bytes;
-} camel_sender_t;
+	size_t outstanding_bytes;
+	size_t max_burst_bytes;
+	uint32_t queue_size;
+	int64_t budget_bytes;
+	int64_t last_update_ts_ms;
+} camel_pacer_stats_t;
 
+/*
+ * Create a sender instance.
+ * - bitrate_cb is invoked when a new target bitrate should be applied.
+ * - send_cb is used by the built-in pacer to emit packets.
+ */
 camel_sender_t* camel_sender_create(void* trigger,
 	camel_bitrate_changed_func bitrate_cb,
 	void* handler,
@@ -71,9 +46,44 @@ camel_sender_t* camel_sender_create(void* trigger,
 
 void camel_sender_destroy(camel_sender_t* s);
 
-void camel_sender_send_frame(camel_sender_t* s, uint32_t frame_id, size_t size);
-void camel_sender_on_feedback(camel_sender_t* s, const uint8_t* feedback, int feedback_size);
+/*
+ * Record a transmitted packet.
+ * Set is_group_end=1 for the last packet of the group.
+ */
+void camel_sender_on_packet_sent(camel_sender_t* s,
+	uint32_t group_id,
+	uint16_t transport_seq,
+	size_t payload_size,
+	int is_group_end);
+
+/*
+ * Feed packet-level ACK samples (transport feedback) to the sender.
+ */
+void camel_sender_on_packet_ack(camel_sender_t* s, const uint8_t* payload, int payload_size);
+
+/*
+ * Feed an aggregate group feedback message to the sender.
+ */
+void camel_sender_on_group_feedback(camel_sender_t* s, const uint8_t* payload, int payload_size);
+
+/*
+ * Manual-time mode: drive one heartbeat tick.
+ */
 void camel_sender_heartbeat(camel_sender_t* s, int64_t now_ts_ms);
+
+size_t camel_sender_get_burst_bytes(const camel_sender_t* s);
+int camel_sender_in_fallback(const camel_sender_t* s);
+void camel_sender_set_fallback_enabled(camel_sender_t* s, int enabled);
+
+/*
+ * Real-time mode: start/stop the internal pacing + heartbeat thread.
+ */
+int camel_sender_start(camel_sender_t* s);
+void camel_sender_stop(camel_sender_t* s);
+
+int camel_sender_pacer_insert_packet(camel_sender_t* s, uint32_t packet_id, int retrans, size_t size, int padding, int64_t now_ts_ms);
+void camel_sender_pacer_try_transmit(camel_sender_t* s, int64_t now_ts_ms);
+int camel_sender_get_pacer_stats(const camel_sender_t* s, camel_pacer_stats_t* out);
 
 #ifdef __cplusplus
 }

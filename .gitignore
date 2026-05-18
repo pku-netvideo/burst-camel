@@ -26,6 +26,7 @@ coverage/
 *.swp
 *.swo
 *~
+.trae/
 
 # OS
 .DS_Store

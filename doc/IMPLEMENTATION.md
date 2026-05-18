@@ -1,12 +1,12 @@
-# 实现说明
+# Implementation Notes
 
-## 代码组织
+## Layout
 
-- `src/include/`：对外头文件
-- `src/`：模块实现
-- `test/`：单元测试与仿真测试
+- `src/include/`: public headers
+- `src/`: module implementations
+- `test/`: unit tests and simulation tests
 
-## 目标
+## Goal
 
-独立化以原项目 `/home/pic/documents/video_cc_testbed` 的实现为真值来源，迁移过程中尽量保持算法与行为一致，仅做必要的依赖替换与符号重命名。
-
+This repository is a standalone extraction based on the original implementation in `/home/pic/documents/video_cc_testbed`.
+The intent is to preserve algorithm behavior while applying only necessary dependency changes and symbol renames.

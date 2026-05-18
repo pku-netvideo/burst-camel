@@ -26,8 +26,8 @@ typedef struct {
 
 typedef struct {
     uint64_t            timestamp_us;
-    uint32_t            frame_id;
-    size_t              frame_size;
+    uint32_t            group_id;
+    size_t              group_size;
     uint32_t            packet_count;
     uint32_t            first_packet_size;
     uint64_t            send_ts_us;
@@ -39,14 +39,14 @@ typedef struct {
     uint32_t            lost_bytes;
     uint32_t            lost_packet_count;
     uint32_t            interval_loss[CAMEL_NETWORK_MAX_INTERVALS];
-} camel_frame_event_t;
+} camel_group_event_t;
 
 typedef struct {
-    uint32_t            frame_id;
+    uint32_t            group_id;
     uint64_t            send_ts_us;
     size_t              size;
     uint32_t            packet_count;
-} camel_sent_frame_t;
+} camel_sent_group_t;
 
 typedef struct {
     uint64_t            packet_send_ts_us;
@@ -71,7 +71,7 @@ typedef struct {
     uint32_t                total_sent_bytes;
     uint32_t                total_received_bytes;
     uint32_t                total_lost_bytes;
-    uint32_t                frame_count;
+    uint32_t                group_count;
     uint32_t                packet_count;
     camel_router_buffer_stats_t buffer_stats;
 } camel_network_stats_t;
@@ -91,14 +91,14 @@ typedef struct {
     uint32_t                    queue_capacity;
     uint32_t                    queue_head;
     uint32_t                    queue_tail;
-    camel_sent_frame_t*           sent_frames;
-    uint32_t                    sent_frames_count;
-    uint32_t                    sent_frames_capacity;
+    camel_sent_group_t*           sent_groups;
+    uint32_t                    sent_groups_count;
+    uint32_t                    sent_groups_capacity;
     uint64_t                    sim_time_us;
     uint32_t                    total_sent_bytes;
     uint32_t                    total_received_bytes;
     uint32_t                    total_lost_bytes;
-    uint32_t                    frame_count;
+    uint32_t                    group_count;
     uint32_t                    packet_count;
     camel_router_buffer_stats_t   buffer_stats;
 } camel_network_simulator_t;
@@ -116,13 +116,13 @@ int camel_network_simulator_add_synthetic_scenario(camel_network_simulator_t* si
                                                   uint32_t buffer_bytes);
 void camel_network_simulator_update_time(camel_network_simulator_t* sim, uint64_t now_us);
 
-int camel_network_simulator_send_frame(camel_network_simulator_t* sim,
-                                      uint32_t frame_id,
-                                      size_t frame_size,
+int camel_network_simulator_send_group(camel_network_simulator_t* sim,
+                                      uint32_t group_id,
+                                      size_t group_size,
                                       uint32_t packet_count,
                                       uint64_t send_ts_us);
 
-camel_frame_event_t* camel_network_simulator_receive_frame(camel_network_simulator_t* sim,
+camel_group_event_t* camel_network_simulator_receive_group(camel_network_simulator_t* sim,
                                                         uint64_t now_ts_us);
 
 void camel_network_simulator_get_stats(camel_network_simulator_t* sim,

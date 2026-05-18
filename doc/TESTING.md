@@ -1,16 +1,14 @@
-# 测试说明
+# Testing
 
-## 运行测试
+## Run Tests
 
-在项目根目录：
+From the repository root:
 
 ```bash
-make -C test clean
-make -C test
-./test/fcc_unittest
+make clean && make test
 ```
 
-## 与原项目一致性
+## Behavioral Consistency
 
-迁移过程中，单测优先直接移植原项目 `video_cc_testbed/framecc_test` 中对应的测试序列与断言语义，用于确保行为一致。
-
+During extraction/migration, the unit tests aim to preserve the intent and assertions of the original implementation
+in `video_cc_testbed` to validate behavioral consistency.

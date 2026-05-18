@@ -206,3 +206,56 @@ void camel_feedback_msg_decode(camel_bin_stream_t* strm, camel_feedback_msg_t* m
 		camel_mach_uint32_read(strm, &msg->interval_received_bytes[i]);
 }
 
+void camel_group_feedback_msg_encode(camel_bin_stream_t* strm, camel_group_feedback_msg_t* msg)
+{
+	camel_bin_stream_rewind(strm, 1);
+	camel_mach_uint32_write(strm, msg->group_id);
+	camel_mach_uint32_write(strm, msg->group_size_bytes);
+	camel_mach_uint32_write(strm, msg->packet_count);
+	camel_mach_uint32_write(strm, msg->first_packet_size);
+	camel_mach_uint64_write(strm, msg->first_recv_ts_us);
+	camel_mach_uint64_write(strm, msg->last_recv_ts_us);
+	camel_mach_uint32_write(strm, msg->interval_count);
+	for (uint32_t i = 0; i < msg->interval_count && i < CAMEL_FEEDBACK_MAX_INTERVALS; i++)
+		camel_mach_uint32_write(strm, msg->interval_received_bytes[i]);
+}
+
+void camel_group_feedback_msg_decode(camel_bin_stream_t* strm, camel_group_feedback_msg_t* msg)
+{
+	memset(msg, 0, sizeof(*msg));
+	camel_mach_uint32_read(strm, &msg->group_id);
+	camel_mach_uint32_read(strm, &msg->group_size_bytes);
+	camel_mach_uint32_read(strm, &msg->packet_count);
+	camel_mach_uint32_read(strm, &msg->first_packet_size);
+	camel_mach_uint64_read(strm, &msg->first_recv_ts_us);
+	camel_mach_uint64_read(strm, &msg->last_recv_ts_us);
+	camel_mach_uint32_read(strm, &msg->interval_count);
+	if (msg->interval_count > CAMEL_FEEDBACK_MAX_INTERVALS)
+		msg->interval_count = CAMEL_FEEDBACK_MAX_INTERVALS;
+	for (uint32_t i = 0; i < msg->interval_count; i++)
+		camel_mach_uint32_read(strm, &msg->interval_received_bytes[i]);
+}
+
+void camel_transport_feedback_msg_encode(camel_bin_stream_t* strm, camel_transport_feedback_msg_t* msg)
+{
+	camel_bin_stream_rewind(strm, 1);
+	camel_mach_uint16_write(strm, msg->sample_count);
+	for (uint32_t i = 0; i < (uint32_t)msg->sample_count && i < CAMEL_TRANSPORT_FEEDBACK_MAX_SAMPLES; i++) {
+		camel_mach_uint16_write(strm, msg->samples[i].transport_seq);
+		camel_mach_uint64_write(strm, msg->samples[i].recv_ts_us);
+	}
+}
+
+void camel_transport_feedback_msg_decode(camel_bin_stream_t* strm, camel_transport_feedback_msg_t* msg)
+{
+	uint16_t count;
+	memset(msg, 0, sizeof(*msg));
+	camel_mach_uint16_read(strm, &count);
+	if (count > CAMEL_TRANSPORT_FEEDBACK_MAX_SAMPLES)
+		count = CAMEL_TRANSPORT_FEEDBACK_MAX_SAMPLES;
+	msg->sample_count = count;
+	for (uint32_t i = 0; i < (uint32_t)msg->sample_count; i++) {
+		camel_mach_uint16_read(strm, &msg->samples[i].transport_seq);
+		camel_mach_uint64_read(strm, &msg->samples[i].recv_ts_us);
+	}
+}

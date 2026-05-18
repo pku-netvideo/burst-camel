@@ -38,7 +38,7 @@ typedef struct
 camel_receiver_t* camel_receiver_create(void* handler, camel_send_feedback_func cb);
 void camel_receiver_destroy(camel_receiver_t* r);
 
-void camel_receiver_on_received_frame_info(camel_receiver_t* r, uint16_t frame_id, size_t size);
+void camel_receiver_on_received_frame_info(camel_receiver_t* r, uint32_t frame_id, size_t size);
 
 #ifdef __cplusplus
 }

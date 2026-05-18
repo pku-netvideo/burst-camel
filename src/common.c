@@ -179,6 +179,7 @@ void camel_feedback_msg_encode(camel_bin_stream_t* strm, camel_feedback_msg_t* m
 	camel_mach_uint16_write(strm, msg->last_transport_seq);
 	camel_mach_uint64_write(strm, msg->first_ts);
 	camel_mach_uint64_write(strm, msg->last_ts);
+	camel_mach_uint64_write(strm, msg->feedback_send_ts_us);
 	camel_mach_uint32_write(strm, msg->interval_count);
 	for (uint32_t i = 0; i < msg->interval_count && i < CAMEL_FEEDBACK_MAX_INTERVALS; i++)
 		camel_mach_uint32_write(strm, msg->interval_received_bytes[i]);
@@ -197,6 +198,7 @@ void camel_feedback_msg_decode(camel_bin_stream_t* strm, camel_feedback_msg_t* m
 	camel_mach_uint16_read(strm, &msg->last_transport_seq);
 	camel_mach_uint64_read(strm, &msg->first_ts);
 	camel_mach_uint64_read(strm, &msg->last_ts);
+	camel_mach_uint64_read(strm, &msg->feedback_send_ts_us);
 	camel_mach_uint32_read(strm, &msg->interval_count);
 	if (msg->interval_count > CAMEL_FEEDBACK_MAX_INTERVALS)
 		msg->interval_count = CAMEL_FEEDBACK_MAX_INTERVALS;

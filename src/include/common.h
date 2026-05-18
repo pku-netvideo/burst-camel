@@ -45,6 +45,7 @@ typedef struct
 	uint16_t last_transport_seq;
 	uint64_t first_ts;
 	uint64_t last_ts;
+	uint64_t feedback_send_ts_us;
 	uint32_t interval_count;
 	uint32_t interval_received_bytes[CAMEL_FEEDBACK_MAX_INTERVALS];
 } camel_feedback_msg_t;

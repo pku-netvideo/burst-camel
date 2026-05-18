@@ -46,7 +46,7 @@ static void camel_receiver_record_interval_bytes(camel_receiver_t* r, size_t fra
 		size_t bytes = camel_min_size(size, interval_end - frame_offset);
 
 		if (interval >= CAMEL_FEEDBACK_MAX_INTERVALS)
-			interval = CAMEL_FEEDBACK_MAX_INTERVALS - 1;
+			break;
 
 		r->cur_frame_interval_received_bytes[interval] += (uint32_t)bytes;
 		r->cur_frame_interval_count = camel_max_u32(r->cur_frame_interval_count, interval + 1);
@@ -64,6 +64,7 @@ static void camel_receiver_fill_feedback(camel_receiver_t* r, camel_feedback_msg
 	msg->first_packet_size = r->cur_frame_first_packet_size;
 	msg->first_ts = r->first_ts;
 	msg->last_ts = r->last_ts;
+	msg->feedback_send_ts_us = camel_get_sys_us();
 	msg->interval_count = r->cur_frame_interval_count;
 	memcpy(msg->interval_received_bytes, r->cur_frame_interval_received_bytes,
 		sizeof(uint32_t) * msg->interval_count);
@@ -103,7 +104,7 @@ void camel_receiver_destroy(camel_receiver_t* r)
 	free(r);
 }
 
-void camel_receiver_on_received_frame_info(camel_receiver_t* r, uint16_t frame_id, size_t size)
+void camel_receiver_on_received_frame_info(camel_receiver_t* r, uint32_t frame_id, size_t size)
 {
 	uint64_t cur_ts = camel_get_sys_us();
 

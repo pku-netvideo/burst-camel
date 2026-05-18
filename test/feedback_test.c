@@ -21,6 +21,7 @@ int test_feedback_codec(void)
 	input.last_transport_seq = 81;
 	input.first_ts = 1000000;
 	input.last_ts = 1009000;
+	input.feedback_send_ts_us = 1010500;
 	input.interval_count = 3;
 	input.interval_received_bytes[0] = 2048;
 	input.interval_received_bytes[1] = 2048;
@@ -38,6 +39,7 @@ int test_feedback_codec(void)
 	FCC_EXPECT_EQ("last seq round trip", output.last_transport_seq, input.last_transport_seq);
 	FCC_EXPECT_EQ("first ts round trip", output.first_ts, input.first_ts);
 	FCC_EXPECT_EQ("last ts round trip", output.last_ts, input.last_ts);
+	FCC_EXPECT_EQ("feedback send ts round trip", output.feedback_send_ts_us, input.feedback_send_ts_us);
 	FCC_EXPECT_EQ("interval count round trip", output.interval_count, input.interval_count);
 	FCC_EXPECT_EQ("interval 0 round trip",
 		output.interval_received_bytes[0], input.interval_received_bytes[0]);

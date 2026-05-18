@@ -85,6 +85,10 @@ static uint32_t camel_sender_interval_sent_bytes(size_t frame_size, uint32_t int
 static void camel_sender_update_burst_controller(camel_sender_t* s, const camel_feedback_msg_t* msg, int64_t now_ts_ms)
 {
 	uint32_t interval_count = msg->interval_count;
+	uint32_t fit_idx = msg->frame_id % CAMEL_MAX_FRAME_NUM;
+	size_t sent_frame_size = (s->fit.frame_id[fit_idx] == msg->frame_id)
+		? s->fit.frame_size[fit_idx]
+		: msg->frame_size;
 
 	if (interval_count == 0)
 		return;
@@ -93,7 +97,7 @@ static void camel_sender_update_burst_controller(camel_sender_t* s, const camel_
 		interval_count = CAMEL_FEEDBACK_MAX_INTERVALS;
 
 	for (uint32_t i = 0; i < interval_count; i++) {
-		uint32_t sent = camel_sender_interval_sent_bytes(msg->frame_size, i);
+		uint32_t sent = camel_sender_interval_sent_bytes(sent_frame_size, i);
 		uint32_t received = msg->interval_received_bytes[i] < sent ? msg->interval_received_bytes[i] : sent;
 		uint32_t lost = sent - received;
 
@@ -155,7 +159,6 @@ void camel_sender_destroy(camel_sender_t* s)
 
 void camel_sender_send_frame(camel_sender_t* s, uint32_t frame_id, size_t size)
 {
-	(void)size;
 	if (s == NULL)
 		return;
 
@@ -163,6 +166,8 @@ void camel_sender_send_frame(camel_sender_t* s, uint32_t frame_id, size_t size)
 	uint32_t idx = frame_id % CAMEL_MAX_FRAME_NUM;
 	s->fit.frame_id[idx] = frame_id;
 	s->fit.frame_send_ts[idx] = now;
+	s->fit.frame_size[idx] = size;
+	s->inflight_bytes += (uint64_t)size;
 }
 
 void camel_sender_on_feedback(camel_sender_t* s, const uint8_t* feedback, int feedback_size)
@@ -189,10 +194,20 @@ void camel_sender_on_feedback(camel_sender_t* s, const uint8_t* feedback, int fe
 
 	camel_sender_update_burst_controller(s, &msg, (int64_t)(camel_get_sys_us() / 1000));
 
+	if (s->inflight_bytes >= msg.frame_size)
+		s->inflight_bytes -= (uint64_t)msg.frame_size;
+	else
+		s->inflight_bytes = 0;
+
 	uint32_t idx = msg.frame_id % CAMEL_MAX_FRAME_NUM;
 	uint64_t send_ts = (s->fit.frame_id[idx] == msg.frame_id) ? s->fit.frame_send_ts[idx] : 0;
 
 	if (send_ts > 0 && msg.packet_count >= 2 && msg.frame_size > msg.first_packet_size) {
+		uint64_t recv_fb_ts = camel_get_sys_us();
+		uint64_t delay_us = recv_fb_ts > send_ts ? recv_fb_ts - send_ts : 1;
+		if (delay_us == 0)
+			delay_us = 1;
+
 		camel_frame_sample_t sample;
 		memset(&sample, 0, sizeof(sample));
 		sample.frame_id = msg.frame_id;
@@ -200,11 +215,11 @@ void camel_sender_on_feedback(camel_sender_t* s, const uint8_t* feedback, int fe
 		sample.bytes_excluding_first = msg.frame_size - msg.first_packet_size;
 		sample.first_recv_ts_us = msg.first_ts;
 		sample.last_recv_ts_us = msg.last_ts;
-		sample.delay_us = msg.first_ts > send_ts ? msg.first_ts - send_ts : 0;
+		sample.delay_us = delay_us;
 
 		if (camel_estimator_add_sample(&s->estimator, &sample) == 0) {
 			camel_congestion_result_t result =
-				camel_congestion_detector_add_sample(&s->detector, msg.frame_size, sample.delay_us);
+				camel_congestion_detector_add_sample(&s->detector, s->inflight_bytes, sample.delay_us);
 			s->camel_gamma = result.gamma;
 			s->camel_last_slope_us_per_byte = result.slope_us_per_byte;
 			s->congestion_window_bytes = (size_t)((double)camel_estimator_get_bdp_bytes(&s->estimator) * result.gamma);

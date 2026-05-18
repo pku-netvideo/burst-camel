@@ -29,6 +29,7 @@ typedef struct {
     uint64_t                    last_update_ts_ms;
     uint32_t                    update_interval_ms;
     int                         fallback_mode;
+    uint32_t                    last_excess_loss_interval;
     camel_burst_interval_stat_t intervals[CAMEL_BURST_MAX_INTERVALS];
 } camel_burst_controller_t;
 

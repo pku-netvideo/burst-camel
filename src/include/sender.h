@@ -24,12 +24,13 @@ typedef void (*camel_pace_send_func)(void* handler, uint32_t packet_id, int retr
 typedef void (*camel_app_layer_predict_func)(void* trigger, int32_t target_rate, double* ssim, double* pssim,
 	double* size_u, double* size_sigma2);
 
-#define CAMEL_MAX_FRAME_NUM 300
+#define CAMEL_MAX_FRAME_NUM 1024
 
 typedef struct
 {
 	uint32_t frame_id[CAMEL_MAX_FRAME_NUM];
 	uint64_t frame_send_ts[CAMEL_MAX_FRAME_NUM];
+	size_t   frame_size[CAMEL_MAX_FRAME_NUM];
 } camel_frame_info_t;
 
 typedef struct
@@ -57,6 +58,7 @@ typedef struct
 	uint32_t camel_target_bitrate_bps;
 	double camel_gamma;
 	double camel_last_slope_us_per_byte;
+	uint64_t inflight_bytes;
 } camel_sender_t;
 
 camel_sender_t* camel_sender_create(void* trigger,

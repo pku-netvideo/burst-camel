@@ -6,7 +6,7 @@
 
 typedef struct
 {
-	uint8_t payload[256];
+	uint8_t payload[512];
 	int payload_size;
 	int calls;
 } receiver_feedback_capture_t;
@@ -60,6 +60,50 @@ int test_receiver_aggregation(void)
 	FCC_EXPECT_EQ("feedback interval 1 bytes", msg.interval_received_bytes[1], 652);
 	FCC_EXPECT_TRUE("feedback timestamps ordered", msg.last_ts >= msg.first_ts);
 
+	camel_bin_stream_destroy(&strm);
+	camel_receiver_destroy(receiver);
+
+	memset(&capture, 0, sizeof(capture));
+	receiver = camel_receiver_create(&capture, capture_feedback);
+
+	camel_receiver_on_received_frame_info(receiver, 65536, 500);
+	camel_receiver_on_received_frame_info(receiver, 65536, 400);
+	FCC_EXPECT_EQ("no feedback for frame 65536 yet", capture.calls, 0);
+
+	camel_receiver_on_received_frame_info(receiver, 65537, 300);
+	FCC_EXPECT_EQ("feedback emitted on frame 65537 arrival", capture.calls, 1);
+
+	camel_bin_stream_init(&strm);
+	if ((size_t)capture.payload_size <= strm.size) {
+		memcpy(strm.data, capture.payload, (size_t)capture.payload_size);
+		strm.used = (size_t)capture.payload_size;
+		camel_bin_stream_rewind(&strm, 0);
+		memset(&msg, 0, sizeof(msg));
+		camel_feedback_msg_decode(&strm, &msg);
+		FCC_EXPECT_EQ("large frame_id preserved in feedback", msg.frame_id, 65536U);
+		FCC_EXPECT_EQ("large frame total size correct", (uint64_t)msg.frame_size, 900ULL);
+	}
+	camel_bin_stream_destroy(&strm);
+	camel_receiver_destroy(receiver);
+
+	memset(&capture, 0, sizeof(capture));
+	receiver = camel_receiver_create(&capture, capture_feedback);
+
+	for (int i = 0; i < 66; i++)
+		camel_receiver_on_received_frame_info(receiver, 100, 2048);
+	camel_receiver_on_received_frame_info(receiver, 101, 100);
+	FCC_EXPECT_EQ("oversized frame triggers feedback", capture.calls, 1);
+
+	camel_bin_stream_init(&strm);
+	if ((size_t)capture.payload_size <= strm.size) {
+		memcpy(strm.data, capture.payload, (size_t)capture.payload_size);
+		strm.used = (size_t)capture.payload_size;
+		camel_bin_stream_rewind(&strm, 0);
+		memset(&msg, 0, sizeof(msg));
+		camel_feedback_msg_decode(&strm, &msg);
+		FCC_EXPECT_EQ("oversized frame interval_count does not exceed 64", msg.interval_count, 64U);
+		FCC_EXPECT_EQ("oversized frame interval 63 has at most 2048 bytes", msg.interval_received_bytes[63], 2048U);
+	}
 	camel_bin_stream_destroy(&strm);
 	camel_receiver_destroy(receiver);
 	return failed;

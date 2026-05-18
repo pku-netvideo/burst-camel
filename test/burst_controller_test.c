@@ -1,6 +1,7 @@
 #include "test_framework.h"
 #include "burst_controller.h"
 #include <string.h>
+#include <stdint.h>
 
 static void record_loss_rate(camel_burst_controller_t* ctrl, uint32_t interval, uint32_t sent, uint32_t lost)
 {
@@ -23,6 +24,8 @@ int test_burst_controller(void)
     FCC_EXPECT_EQ("Should return 1", result, 1);
     printf("  Burst after update: %u bytes (expected 6144)\n", (unsigned)ctrl.current_burst_bytes);
     FCC_EXPECT_EQ("Burst increases by 2KB", ctrl.current_burst_bytes, 6144);
+    FCC_EXPECT_EQ("No excess loss: last_excess_loss_interval is UINT32_MAX",
+        ctrl.last_excess_loss_interval, UINT32_MAX);
     
     printf("\nTest 2: Excess loss updates\n");
     record_loss_rate(&ctrl, 0, 100, 1);
@@ -31,6 +34,7 @@ int test_burst_controller(void)
     FCC_EXPECT_EQ("Should return 1", result, 1);
     printf("  Burst after excess loss: %u bytes (expected 4096)\n", (unsigned)ctrl.current_burst_bytes);
     FCC_EXPECT_EQ("Burst decreases by 2KB", ctrl.current_burst_bytes, 4096);
+    FCC_EXPECT_EQ("Excess loss interval recorded", ctrl.last_excess_loss_interval, 2U);
     
     printf("\nTest 3: Physical loss updates\n");
     record_loss_rate(&ctrl, 0, 100, 10);
@@ -48,6 +52,7 @@ int test_burst_controller(void)
     FCC_EXPECT_EQ("Should return 1", result, 1);
     printf("  Fallback mode: %d (expected 1)\n", ctrl.fallback_mode);
     FCC_EXPECT_EQ("Fallback enabled at min burst", ctrl.fallback_mode, 1);
+    FCC_EXPECT_EQ("Excess loss interval recorded at min burst", ctrl.last_excess_loss_interval, 3U);
     
     printf("\nTest 5: Max burst clamp\n");
     camel_burst_controller_init(&ctrl, 2048, 8192, 8192);

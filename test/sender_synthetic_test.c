@@ -107,7 +107,9 @@ int test_sender_synthetic(void)
 
 	memset(&capture, 0, sizeof(capture));
 	sender = camel_sender_create(&capture, test_bitrate_changed, NULL, test_pace_send, 0, 0, test_app_predict);
-	camel_sender_send_frame(sender, 10, 1000);
+	camel_sender_send_frame(sender, 10, 3000);
+
+	FCC_EXPECT_EQ("inflight increases after send_frame", sender->inflight_bytes, 3000ULL);
 
 	camel_bin_stream_init(&strm);
 	memset(&msg, 0, sizeof(msg));
@@ -120,10 +122,11 @@ int test_sender_synthetic(void)
 	camel_feedback_msg_encode(&strm, &msg);
 	camel_sender_on_feedback(sender, strm.data, (int)strm.used);
 
+	FCC_EXPECT_EQ("inflight decreases after feedback", sender->inflight_bytes, 0ULL);
 	FCC_EXPECT_TRUE("sender estimator received sample", sender->estimator.valid_samples == 1);
 	FCC_EXPECT_EQ("sender camel target is 4 Mbps",
 		(uint64_t)sender->camel_target_bitrate_bps, 4000000ULL);
-	FCC_EXPECT_TRUE("sender cwnd updated", sender->congestion_window_bytes > 0);
+	FCC_EXPECT_TRUE("sender min delay recorded (RTT > 0)", sender->estimator.min_delay_us > 0);
 	FCC_EXPECT_DOUBLE_EQ("sender camel gamma stored", sender->camel_gamma, 1.0, 0.000001);
 
 	camel_sender_heartbeat(sender, (int64_t)camel_test_sys_ms() + 1000);
@@ -135,6 +138,49 @@ int test_sender_synthetic(void)
 		(uint64_t)capture.bitrate_calls, 1ULL);
 
 	camel_bin_stream_destroy(&strm);
+	camel_sender_destroy(sender);
+
+	memset(&capture, 0, sizeof(capture));
+	sender = camel_sender_create(&capture, test_bitrate_changed, NULL, test_pace_send, 0, 0, test_app_predict);
+	{
+		size_t initial_burst = sender->burst_ctrl.current_burst_bytes;
+		camel_sender_send_frame(sender, 20, 5000);
+
+		camel_bin_stream_init(&strm);
+		memset(&msg, 0, sizeof(msg));
+		msg.frame_id = 20;
+		msg.frame_size = 3000;
+		msg.packet_count = 3;
+		msg.first_packet_size = 1000;
+		msg.first_ts = 0;
+		msg.last_ts = 4000;
+		msg.interval_count = 3;
+		msg.interval_received_bytes[0] = 2048;
+		msg.interval_received_bytes[1] = 952;
+		msg.interval_received_bytes[2] = 0;
+		camel_feedback_msg_encode(&strm, &msg);
+		camel_sender_on_feedback(sender, strm.data, (int)strm.used);
+
+		FCC_EXPECT_TRUE("burst decreases when interval 2 lost using correct sender frame_size 5000",
+			sender->burst_ctrl.current_burst_bytes < initial_burst);
+
+		camel_bin_stream_destroy(&strm);
+	}
+
+	camel_sender_destroy(sender);
+
+	memset(&capture, 0, sizeof(capture));
+	sender = camel_sender_create(&capture, test_bitrate_changed, NULL, test_pace_send, 0, 0, test_app_predict);
+
+	camel_sender_send_frame(sender, 1, 2000);
+	camel_sender_send_frame(sender, 301, 3000);
+	FCC_EXPECT_EQ("frame_id 1 slot not overwritten by frame_id 301 with MAX_FRAME_NUM=1024",
+		sender->fit.frame_id[1 % 1024], 1U);
+	FCC_EXPECT_EQ("frame_id 301 stored at its own slot",
+		sender->fit.frame_id[301 % 1024], 301U);
+	FCC_EXPECT_EQ("frame 1 size recorded correctly", sender->fit.frame_size[1 % 1024], (size_t)2000);
+	FCC_EXPECT_EQ("frame 301 size recorded correctly", sender->fit.frame_size[301 % 1024], (size_t)3000);
+
 	camel_sender_destroy(sender);
 
 	return failed;

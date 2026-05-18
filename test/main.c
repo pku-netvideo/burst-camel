@@ -32,6 +32,7 @@ int main(int argc, char** argv) {
     failed += run_test("congestion_detector", test_congestion_detector);
     failed += run_test("burst_controller", test_burst_controller);
     failed += run_test("feedback_codec", test_feedback_codec);
+    failed += run_test("receiver_aggregation", test_receiver_aggregation);
     /* TODO: Add remaining tests when modules are ready */
     printf("\n[Remaining tests pending implementation]\n");
     

@@ -29,6 +29,7 @@ int main(int argc, char** argv) {
     printf("====================\n");
     
     failed += run_test("bandwidth_estimator", test_bandwidth_estimator);
+    failed += run_test("congestion_detector", test_congestion_detector);
     /* TODO: Add remaining tests when modules are ready */
     printf("\n[Remaining tests pending implementation]\n");
     

@@ -4,9 +4,10 @@ LDFLAGS = -lm
 
 TEST_SOURCES = main.c \
 	test_framework.c \
-	bandwidth_estimator_test.c
+	bandwidth_estimator_test.c \
+	congestion_detector_test.c
 
-TEST_OBJECTS = bandwidth_estimator.o
+TEST_OBJECTS = bandwidth_estimator.o congestion_detector.o
 
 TEST_EXEC = fcc_unittest
 
@@ -14,8 +15,11 @@ TEST_EXEC = fcc_unittest
 
 all: $(TEST_OBJECTS) $(TEST_EXEC)
 
-$(TEST_OBJECTS): ../src/bandwidth_estimator.c
+bandwidth_estimator.o: ../src/bandwidth_estimator.c
 	$(CC) $(CFLAGS) -c ../src/bandwidth_estimator.c -o $@
+
+congestion_detector.o: ../src/congestion_detector.c
+	$(CC) $(CFLAGS) -c ../src/congestion_detector.c -o $@
 
 $(TEST_EXEC): $(TEST_SOURCES) $(TEST_OBJECTS)
 	$(CC) $(CFLAGS) $(TEST_SOURCES) $(TEST_OBJECTS) -o $(TEST_EXEC) $(LDFLAGS)

@@ -45,59 +45,78 @@ make clean
 
 ### Example Usage
 
+`burst-camel` does not ship a feedback transport. In a real deployment, the sender and receiver typically run in different processes (often on different machines). The receiver emits ACK/group-feedback payloads, and your application must deliver those payloads back to the sender over a feedback channel (UDP/QUIC data channel/RTCP APP/etc.).
+
+End-to-end data flow:
+
+```
+Sender process                    Network                    Receiver process
+--------------                                           -------------------
+send packets  ------------------------------------------>  receive packets
+
+Sender process                  Feedback channel           Receiver process
+--------------                                           -------------------
+consume ACK/group feedback  <----------------------------  emit ACK/group feedback
+```
+
+#### Sender process (uplink)
+
 ```c
 #include "src/include/camel.h"
 
 static void on_bitrate_changed(void* user, uint32_t bitrate, uint8_t fraction_loss, uint32_t rtt) {
   (void)user; (void)fraction_loss; (void)rtt;
-  /* Apply bitrate to your encoder. */
 }
 
 static void pace_send(void* user, uint32_t packet_id, int retrans, size_t size, int padding) {
   (void)user; (void)packet_id; (void)retrans; (void)size; (void)padding;
-  /* Send one packet on the wire. */
 }
 
-static void on_group_feedback(void* user, const uint8_t* payload, int payload_size) {
-  camel_sender_t* sender = (camel_sender_t*)user;
-  camel_sender_on_group_feedback(sender, payload, payload_size);
-}
-
-static void on_packet_ack(void* user, const uint8_t* payload, int payload_size) {
-  camel_sender_t* sender = (camel_sender_t*)user;
+static void on_feedback_packet_from_network(camel_sender_t* sender, const uint8_t* payload, int payload_size) {
   camel_sender_on_packet_ack(sender, payload, payload_size);
 }
 
-/* Create sender/receiver. */
-camel_sender_t* sender = camel_sender_create(
-    user_data,
-    on_bitrate_changed,
-    handler,
-    pace_send,
-    0,
-    0,
-    app_predict_callback
-);
+static void on_feedback_group_from_network(camel_sender_t* sender, const uint8_t* payload, int payload_size) {
+  camel_sender_on_group_feedback(sender, payload, payload_size);
+}
 
-camel_receiver_t* receiver = camel_receiver_create(sender, on_group_feedback, on_packet_ack);
-
-/* Real-time mode: start internal pacing + heartbeat thread. */
+camel_sender_t* sender = camel_sender_create(user_data, on_bitrate_changed, handler, pace_send, 0, 0, app_predict_callback);
 camel_sender_start(sender);
 
-/*
- * For each outgoing packet:
- * - assign a monotonically increasing transport_seq
- * - choose a group_id and set is_group_end=1 for the last packet of that group
- */
+/* For each outgoing packet, after you put it on the wire. */
 camel_sender_on_packet_sent(sender, group_id, transport_seq, payload_size, is_group_end);
 
-/* For each incoming packet at the receiver: */
+/* When feedback payloads arrive from the receiver over your feedback channel. */
+on_feedback_packet_from_network(sender, ack_payload, ack_size);
+on_feedback_group_from_network(sender, group_payload, group_size);
+
+camel_sender_stop(sender);
+camel_sender_destroy(sender);
+```
+
+#### Receiver process (downlink)
+
+```c
+#include "src/include/camel.h"
+
+static void send_to_sender_over_feedback_channel(const uint8_t* payload, int payload_size);
+
+static void on_group_feedback(void* handler, const uint8_t* payload, int payload_size) {
+  (void)handler;
+  send_to_sender_over_feedback_channel(payload, payload_size);
+}
+
+static void on_packet_ack(void* handler, const uint8_t* payload, int payload_size) {
+  (void)handler;
+  send_to_sender_over_feedback_channel(payload, payload_size);
+}
+
+camel_receiver_t* receiver = camel_receiver_create(NULL, on_group_feedback, on_packet_ack);
+
+/* For each received packet at the receiver. */
 camel_receiver_on_packet_received(receiver, group_id, transport_seq, payload_size, is_group_end);
 
-/* Cleanup */
-camel_sender_stop(sender);
 camel_receiver_destroy(receiver);
-camel_sender_destroy(sender);
 ```
 
 ## End-to-End Pipeline

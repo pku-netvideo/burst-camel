@@ -22,11 +22,15 @@ All public APIs are exported via [camel.h](file:///home/pic/documents/burst-came
 
 ## Receiver (Packet-Level)
 
+The receiver emits feedback payloads via callbacks. Your application is responsible for delivering those payloads to the sender over a feedback channel.
+
 - `camel_receiver_create`
 - `camel_receiver_on_packet_received`
 - `camel_receiver_destroy`
 
 ## Sender (Packet-Level)
+
+The sender consumes feedback payloads produced by the receiver (typically received over the network) via:
 
 - `camel_sender_create`
 - `camel_sender_on_packet_sent`

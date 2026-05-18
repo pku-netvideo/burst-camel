@@ -61,7 +61,6 @@ camel_congestion_result_t camel_congestion_detector_add_sample(camel_congestion_
     
     double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_xx = 0.0;
     uint32_t valid_count = 0;
-    double mean_x = 0.0, mean_y = 0.0;
     
     for (uint32_t i = 0; i < det->count; i++) {
         uint32_t idx = (start_idx + i) % CAMEL_CONGESTION_DETECTOR_MAX_SAMPLES;
@@ -73,11 +72,6 @@ camel_congestion_result_t camel_congestion_detector_add_sample(camel_congestion_
         sum_xy += x * y;
         sum_xx += x * x;
         valid_count++;
-    }
-    
-    if (valid_count > 0) {
-        mean_x = sum_x / valid_count;
-        mean_y = sum_y / valid_count;
     }
     
     double denominator = sum_xx - sum_x * sum_x / valid_count;

@@ -30,6 +30,7 @@ int main(int argc, char** argv) {
     
     failed += run_test("bandwidth_estimator", test_bandwidth_estimator);
     failed += run_test("congestion_detector", test_congestion_detector);
+    failed += run_test("burst_controller", test_burst_controller);
     /* TODO: Add remaining tests when modules are ready */
     printf("\n[Remaining tests pending implementation]\n");
     

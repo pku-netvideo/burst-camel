@@ -1,6 +1,15 @@
-# CAMEL-CC
+# burst-camel (Official CAMEL-CC Reference Implementation)
 
-**CAMEL-CC** (Combined Aggregate and Media-level Estimation for Congestion Control) is a congestion control algorithm implementation for real-time media.
+[![language](https://img.shields.io/badge/language-C-blue.svg)](./)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+
+**burst-camel** is the **official reference implementation** of **CAMEL-CC**, a congestion control algorithm for low-latency live streaming (LLS). It includes a sender-side controller, a reference receiver for feedback generation, a simple pacer, and a small simulation/test harness.
+
+**Paper**: *Camel: Frame-Level Bandwidth Estimation for Low-Latency Live Streaming under Video Bitrate Undershooting* (WWW ’26). DOI: https://doi.org/10.1145/3774904.3792535
+
+## Abstract (from the paper)
+
+> Low-latency live streaming (LLS) has emerged as a popular web application, with many platforms adopting real-time protocols such as WebRTC to minimize end-to-end latency. However, we observe a counter-intuitive phenomenon: even when the actual encoded bitrate does not fully utilize the available bandwidth, stalling events remain frequent. This insufficient bandwidth utilization arises from the intrinsic temporal variations of real-time video encoding, which cause conventional packet-level congestion control algorithms to misestimate available bandwidth. When a high-bitrate frame is suddenly produced, sending at the wrong rate can either trigger packet loss or increase queueing delay, resulting in playback stalls. To address these issues, we present Camel, a novel frame-level congestion control algorithm (CCA) tailored for LLS. Our insight is to use frame-level network feedback to capture the true network capacity, immune to the irregular sending pattern caused by encoding. Camel comprises three key modules: the Bandwidth and Delay Estimator and the Congestion Detector, which jointly determine the average sending rate, and the Bursting Length Controller, which governs the emission pattern to prevent packet loss. We evaluate Camel on both large-scale real-world deployments and controlled simulations. In the real-world platform with 250M users and 2B sessions across 150+ countries, Camel achieves up to a 70.8% increase in 1080P resolution ratio, a 14.4% increase in media bitrate, and up to a 14.1% reduction in stalling ratio. In simulations under undershooting, shallow buffers, and network jitter, Camel outperforms existing congestion control algorithms, with up to 19.8% higher bitrate, 93.0% lower stalling ratio, and 23.9% improvement in bandwidth estimation accuracy.
 
 ## Overview
 
@@ -283,29 +292,6 @@ src/
 
 ## Testing
 
-## Citation
-
-If you use this codebase in academic work, please cite:
-
-```bibtex
-@inproceedings{10.1145/3774904.3792535,
-  author = {Liu, Liming and Jia, Zhidong and Jiang, Li and Zhang, Wei and Xie, Lan and Qian, Feng and Yan, Leju and Yan, Bing and Ma, Qiang and Sha, Zhou and Yang, Wei and Ban, Yixuan and Zhang, Xinggong},
-  title = {Camel: Frame-Level Bandwidth Estimation for Low-Latency Live Streaming under Video Bitrate Undershooting},
-  year = {2026},
-  isbn = {9798400723070},
-  publisher = {Association for Computing Machinery},
-  address = {New York, NY, USA},
-  url = {https://doi.org/10.1145/3774904.3792535},
-  doi = {10.1145/3774904.3792535},
-  booktitle = {Proceedings of the ACM Web Conference 2026},
-  pages = {5557--5567},
-  numpages = {11},
-  keywords = {low-latency live streaming, congestion control, frame-level control, large-scale deployment},
-  location = {United Arab Emirates},
-  series = {WWW '26}
-}
-```
-
 ```bash
 # Run all unit tests
 make test
@@ -344,8 +330,29 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Citation
 
-If you use CAMEL-CC in your research, please cite:
+If you use this codebase in academic work, please cite:
 
-```
-CAMEL-CC: Frame-level Bandwidth Estimation and Congestion Control for Video Transmission
+```bibtex
+@inproceedings{10.1145/3774904.3792535,
+  author = {Liu, Liming and Jia, Zhidong and Jiang, Li and Zhang, Wei and Xie, Lan and Qian, Feng and Yan, Leju and Yan, Bing and Ma, Qiang and Sha, Zhou and Yang, Wei and Ban, Yixuan and Zhang, Xinggong},
+  title = {Camel: Frame-Level Bandwidth Estimation for Low-Latency Live Streaming under Video Bitrate Undershooting},
+  year = {2026},
+  isbn = {9798400723070},
+  publisher = {Association for Computing Machinery},
+  address = {New York, NY, USA},
+  url = {https://doi.org/10.1145/3774904.3792535},
+  doi = {10.1145/3774904.3792535},
+  booktitle = {Proceedings of the ACM Web Conference 2026},
+  pages = {5557--5567},
+  numpages = {11},
+  keywords = {low-latency live streaming, congestion control, frame-level control, large-scale deployment},
+  location = {United Arab Emirates},
+  series = {WWW '26}
+}
+
+@misc{burst-camel,
+  title = {burst-camel: CAMEL-CC implementation},
+  howpublished = {\\url{https://gitlab.picpic.site/pic/burst-camel}},
+  year = {2026}
+}
 ```

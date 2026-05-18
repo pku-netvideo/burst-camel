@@ -15,7 +15,7 @@ OBJ_FILES = $(SRC_FILES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
 # Test executable
 TEST_EXEC = $(TEST_DIR)/fcc_unittest
-TEST_SOURCES = $(wildcard $(TEST_DIR)/*_test.c) $(TEST_DIR)/main.c $(TEST_DIR)/test_framework.c
+TEST_SOURCES = $(wildcard $(TEST_DIR)/*_test.c) $(TEST_DIR)/network_simulator.c $(TEST_DIR)/main.c $(TEST_DIR)/test_framework.c
 TEST_OBJECTS = $(TEST_SOURCES:%.c=$(BUILD_DIR)/%_test.o)
 
 .PHONY: all clean test
@@ -26,12 +26,14 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
+	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TEST_EXEC): $(TEST_OBJECTS) $(OBJ_FILES)
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
 $(BUILD_DIR)/%_test.o: %.c
+	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 test: $(TEST_EXEC)

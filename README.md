@@ -91,6 +91,59 @@ camel_receiver_destroy(receiver);
 camel_sender_destroy(sender);
 ```
 
+## End-to-End Pipeline
+
+This implementation is fully packet-level at the public API boundary. A typical integration uses a packet group to represent one video frame (or any application-defined aggregation unit), but the library itself only understands packets and groups.
+
+### 1) Sender side: record each transmitted packet
+
+For every packet you put on the wire, call:
+
+```c
+camel_sender_on_packet_sent(sender, group_id, transport_seq, payload_size, is_group_end);
+```
+
+This updates:
+- packet history (for RTT and inflight tracking)
+- per-group send bookkeeping (total group bytes, first packet metadata)
+- inflight bytes (used for cwnd gating)
+
+### 2) Receiver side: feed each received packet and emit feedback
+
+For every received packet, call:
+
+```c
+camel_receiver_on_packet_received(receiver, group_id, transport_seq, payload_size, is_group_end);
+```
+
+The receiver emits two feedback streams via callbacks:
+- Packet-level ACK samples (`packet_ack_cb`) as `camel_transport_feedback_msg_t`
+- Group-level aggregate feedback (`group_feedback_cb`) as `camel_group_feedback_msg_t` when `is_group_end=1`
+
+### 3) Sender side: consume ACK and aggregate feedback
+
+Feed the callback payloads back into the sender:
+
+```c
+camel_sender_on_packet_ack(sender, ack_payload, ack_size);
+camel_sender_on_group_feedback(sender, group_payload, group_size);
+```
+
+The sender only produces a bandwidth/congestion sample when both are available for the same group:
+- First-packet RTT (from ACK) for the group’s first packet
+- Aggregate group feedback (receive time span + received bytes per 2KB interval)
+
+From these samples the sender updates:
+- bandwidth estimator (EWMA bandwidth + min-delay)
+- congestion detector (`gamma`)
+- congestion window (`cwnd = gamma * BDP`)
+- target bitrate (`target = gamma * avg_bandwidth`, unless in fallback)
+
+Updates are pushed into the built-in pacer:
+- pacing bitrate
+- cwnd
+- max burst bytes (from burst controller)
+
 ## Packet-Level RTT (First-Packet RTT)
 
 The delay signal uses the RTT of the first packet of each packet group. This requires packet-level ACK feedback:
@@ -102,6 +155,21 @@ The delay signal uses the RTT of the first packet of each packet group. This req
 3. Feed those callbacks back into the sender via:
    - `camel_sender_on_packet_ack(...)`
    - `camel_sender_on_group_feedback(...)`
+
+### ACK requirements and batch ACK
+
+- Batch ACK is supported: one ACK message may contain multiple `transport_seq` samples (`sample_count > 1`).
+- Not every packet must be ACKed for correctness of parsing, but:
+  - The first packet of each group must be ACKed, otherwise that group will never produce a delay-based sample (it will be missing first-packet RTT).
+  - Inflight accounting only decreases when ACK samples are received; if you ACK too sparsely, inflight may remain artificially high and pacing/cwnd gating can become overly conservative.
+
+### How to packetize video frames
+
+A practical mapping is:
+- One encoded video frame (byte buffer) → one packet group (`group_id = frame_index`).
+- Split the frame into MTU-sized packets (e.g., 1200-byte payload).
+- Set `is_group_end=1` on the last packet of that frame/group.
+- Use a monotonically increasing `transport_seq` across all outgoing packets.
 
 ## Burst Length
 

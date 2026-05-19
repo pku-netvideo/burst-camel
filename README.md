@@ -285,6 +285,19 @@ camel_pacer_stats_t stats;
 camel_sender_get_pacer_stats(sender, &stats);
 ```
 
+### Minimum Pacing Bitrate
+
+The sender and the built-in pacer enforce a minimum pacing bitrate of `500 kbps` by default.
+If the estimated bandwidth or the computed target bitrate drops below this value, the effective pacing bitrate is clamped to the minimum.
+
+How to configure:
+- If you use the sender wrapper (`camel_sender_t`), the minimum is currently a compile-time constant (`CAMEL_MIN_PACE_BITRATE`) and is not exposed as a runtime API.
+- If you integrate the pacer directly (`camel_pacer_t`), you can set the minimum at runtime:
+
+```c
+camel_pacer_set_bitrate_limits(pacer, min_bitrate_bps);
+```
+
 ## Heartbeat / Scheduling
 
 The sender supports two timing modes:

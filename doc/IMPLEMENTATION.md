@@ -8,7 +8,7 @@
 
 ## Goal
 
-This repository is a standalone extraction based on the original implementation in `/home/pic/documents/video_cc_testbed`.
+This repository is a standalone extraction based on an original implementation from a larger internal testbed repository.
 The intent is to preserve algorithm behavior while applying only necessary dependency changes and symbol renames.
 
 ## Integration Boundary

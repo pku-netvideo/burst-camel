@@ -1,5 +1,5 @@
 /*-
-* Copyright (c) 2017-2018 Razor, Inc.
+* Copyright (c) 2026 burst-camel contributors.
 *	All rights reserved.
 *
 * See the file LICENSE for redistribution information.
@@ -24,4 +24,3 @@ typedef void (*camel_app_layer_predict_func)(void* trigger, int32_t target_rate,
 #endif
 
 #endif
-

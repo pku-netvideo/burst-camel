@@ -11,4 +11,4 @@ make clean && make test
 ## Behavioral Consistency
 
 During extraction/migration, the unit tests aim to preserve the intent and assertions of the original implementation
-in `video_cc_testbed` to validate behavioral consistency.
+in the upstream testbed repository to validate behavioral consistency.

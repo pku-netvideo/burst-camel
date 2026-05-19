@@ -1,5 +1,5 @@
 /*-
-* Copyright (c) 2017-2018 Razor, Inc.
+* Copyright (c) 2026 burst-camel contributors.
 *	All rights reserved.
 *
 * See the file LICENSE for redistribution information.
@@ -33,4 +33,3 @@ uint32_t camel_gcc_fallback_on_packet(camel_gcc_fallback_t* g,
 #endif
 
 #endif
-

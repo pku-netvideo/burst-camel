@@ -1,5 +1,5 @@
 /*-
-* Copyright (c) 2017-2018 Razor, Inc.
+* Copyright (c) 2026 burst-camel contributors.
 *	All rights reserved.
 *
 * See the file LICENSE for redistribution information.

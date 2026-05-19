@@ -29,7 +29,7 @@ Implementation:
 ## Burst Controller
 
 - Use 2KB intervals and track per-interval `sent/lost`.
-- Baseline loss: interval 0 loss rate `L0`.
+- Baseline loss: the minimum loss rate observed across all intervals that have `sent > 0` (denoted as `L0`).
 - Excess loss:
   - If any interval has `Li > L0 + 0.1`, decrease burst by 2KB; if burst hits minimum, enter fallback.
   - Otherwise increase burst by 2KB and clamp to the maximum.

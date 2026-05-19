@@ -8,8 +8,10 @@
 *.app
 
 # Test executables
-fcc_unittest
-test_*
+/test/fcc_unittest
+/test/test_*
+!/test/test_*.c
+!/test/test_*.h
 
 # Logs
 *.log

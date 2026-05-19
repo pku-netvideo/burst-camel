@@ -53,6 +53,7 @@ typedef struct
 	uint64_t recv_ts_min_us;
 	uint64_t recv_ts_max_us;
 	uint32_t acked_interval_bytes[CAMEL_FEEDBACK_MAX_INTERVALS];
+	uint64_t sample_inflight_bytes;
 	int valid;
 } camel_group_send_info_t;
 
@@ -212,6 +213,29 @@ static void camel_sender_add_interval_bytes(uint32_t* intervals, uint32_t offset
 	}
 }
 
+static int camel_sender_update_fallback_state(camel_sender_t* s)
+{
+	if (s == NULL)
+		return 0;
+	if (s->burst_ctrl.fallback_mode && !s->in_fallback) {
+		if (!s->fallback_enabled) {
+			s->fatal_error = 1;
+			return -1;
+		}
+		camel_gcc_fallback_init(&s->gcc_fallback, s->min_bitrate, s->max_bitrate,
+			s->camel_target_bitrate_bps > 0 ? s->camel_target_bitrate_bps : s->min_bitrate);
+		s->gcc_target_bitrate_bps = s->gcc_fallback.target_bitrate_bps;
+		s->in_fallback = 1;
+		if (s->pacer != NULL)
+			camel_pacer_set_estimate_bitrate(s->pacer, s->gcc_target_bitrate_bps);
+	}
+	else if (!s->burst_ctrl.fallback_mode && s->in_fallback) {
+		s->in_fallback = 0;
+		s->gcc_target_bitrate_bps = 0;
+	}
+	return 0;
+}
+
 static void camel_sender_try_finalize_group(camel_sender_t* s, uint32_t idx);
 
 static void camel_sender_process_acked_seq(camel_sender_t* s, uint16_t transport_seq, uint64_t recv_ts_us, int has_recv_ts)
@@ -328,7 +352,7 @@ static int camel_sender_try_process_group_sample(camel_sender_t* s, uint32_t idx
 		int64_t now_ts_ms = (int64_t)(camel_get_sys_us() / 1000ULL);
 		if (camel_estimator_add_sample(&s->estimator, &sample, now_ts_ms) == 0) {
 			camel_congestion_result_t result =
-				camel_congestion_detector_add_sample(&s->detector, s->inflight_bytes, sample.delay_us, now_ts_ms);
+				camel_congestion_detector_add_sample(&s->detector, s->groups[idx].sample_inflight_bytes, sample.delay_us, now_ts_ms);
 			s->camel_gamma = result.gamma;
 			s->camel_last_slope_us_per_byte = result.slope_us_per_byte;
 			s->congestion_window_bytes = (size_t)((double)camel_estimator_get_bdp_bytes(&s->estimator) * result.gamma);
@@ -404,7 +428,7 @@ static void camel_sender_try_finalize_group(camel_sender_t* s, uint32_t idx)
 	int64_t now_ts_ms = (int64_t)(camel_get_sys_us() / 1000ULL);
 	if (camel_estimator_add_sample(&s->estimator, &sample, now_ts_ms) == 0) {
 		camel_congestion_result_t result =
-			camel_congestion_detector_add_sample(&s->detector, s->inflight_bytes, sample.delay_us, now_ts_ms);
+			camel_congestion_detector_add_sample(&s->detector, s->groups[idx].sample_inflight_bytes, sample.delay_us, now_ts_ms);
 		s->camel_gamma = result.gamma;
 		s->camel_last_slope_us_per_byte = result.slope_us_per_byte;
 		s->congestion_window_bytes = (size_t)((double)camel_estimator_get_bdp_bytes(&s->estimator) * result.gamma);
@@ -432,6 +456,7 @@ static void camel_sender_try_finalize_group(camel_sender_t* s, uint32_t idx)
 		(void)camel_burst_controller_maybe_update(&s->burst_ctrl, (uint64_t)(camel_get_sys_us() / 1000ULL));
 		if (s->pacer != NULL)
 			camel_pacer_set_max_burst_bytes(s->pacer, s->burst_ctrl.current_burst_bytes);
+		(void)camel_sender_update_fallback_state(s);
 	}
 
 	memset(&s->groups[idx], 0, sizeof(s->groups[idx]));
@@ -492,6 +517,7 @@ camel_sender_t* camel_sender_create(void* trigger,
 	s->cfg.congestion_window_value = 5000;
 	s->cfg.min_delay_window_by_samples = 0;
 	s->cfg.min_delay_window_value = 5000;
+	s->cfg.trust_remote_interval_feedback = 0;
 	s->warning_cb = NULL;
 	s->warning_ctx = NULL;
 
@@ -614,6 +640,8 @@ void camel_sender_on_packet_sent(camel_sender_t* s,
 	s->groups[idx].sent_size_bytes += (uint32_t)payload_size;
 
 	s->inflight_bytes += (uint64_t)payload_size;
+	if (s->inflight_bytes > s->groups[idx].sample_inflight_bytes)
+		s->groups[idx].sample_inflight_bytes = s->inflight_bytes;
 	if (s->pacer != NULL)
 		camel_pacer_set_outstanding(s->pacer, (size_t)s->inflight_bytes);
 
@@ -784,41 +812,32 @@ void camel_sender_on_group_feedback(camel_sender_t* s, const uint8_t* payload, i
 	camel_group_feedback_msg_decode(&s->strm, &msg);
 
 	uint32_t idx = msg.group_id % CAMEL_MAX_GROUP_NUM;
-	uint32_t sent_size = (s->groups[idx].valid && s->groups[idx].group_id == msg.group_id)
-		? s->groups[idx].sent_size_bytes
-		: msg.group_size_bytes;
-
 	uint32_t interval_count = msg.interval_count;
 	if (interval_count > CAMEL_FEEDBACK_MAX_INTERVALS)
 		interval_count = CAMEL_FEEDBACK_MAX_INTERVALS;
-	for (uint32_t i = 0; i < interval_count; i++) {
-		uint32_t sent = camel_sender_interval_sent_bytes(sent_size, i);
-		uint32_t received = msg.interval_received_bytes[i] < sent ? msg.interval_received_bytes[i] : sent;
-		uint32_t lost = sent - received;
-		if (sent > 0)
-			camel_burst_controller_record_interval_counts(&s->burst_ctrl, i, sent, lost);
-	}
 
-	(void)camel_burst_controller_maybe_update(&s->burst_ctrl, (uint64_t)(camel_get_sys_us() / 1000ULL));
-	if (s->pacer != NULL)
-		camel_pacer_set_max_burst_bytes(s->pacer, s->burst_ctrl.current_burst_bytes);
+	if (s->cfg.trust_remote_interval_feedback) {
+		uint32_t sent_size = (s->groups[idx].valid && s->groups[idx].group_id == msg.group_id)
+			? s->groups[idx].sent_size_bytes
+			: msg.group_size_bytes;
+		for (uint32_t i = 0; i < interval_count; i++) {
+			uint32_t sent = camel_sender_interval_sent_bytes(sent_size, i);
+			uint32_t received = msg.interval_received_bytes[i] < sent ? msg.interval_received_bytes[i] : sent;
+			uint32_t lost = sent - received;
+			if (sent > 0)
+				camel_burst_controller_record_interval_counts(&s->burst_ctrl, i, sent, lost);
+		}
 
-	if (s->burst_ctrl.fallback_mode && !s->in_fallback) {
-		if (!s->fallback_enabled) {
-			s->fatal_error = 1;
+		(void)camel_burst_controller_maybe_update(&s->burst_ctrl, (uint64_t)(camel_get_sys_us() / 1000ULL));
+		if (s->pacer != NULL)
+			camel_pacer_set_max_burst_bytes(s->pacer, s->burst_ctrl.current_burst_bytes);
+
+		if (camel_sender_update_fallback_state(s) != 0) {
 			camel_sender_unlock(s);
 			return;
 		}
-		camel_gcc_fallback_init(&s->gcc_fallback, s->min_bitrate, s->max_bitrate,
-			s->camel_target_bitrate_bps > 0 ? s->camel_target_bitrate_bps : s->min_bitrate);
-		s->gcc_target_bitrate_bps = s->gcc_fallback.target_bitrate_bps;
-		s->in_fallback = 1;
-		if (s->pacer != NULL)
-			camel_pacer_set_estimate_bitrate(s->pacer, s->gcc_target_bitrate_bps);
-	}
-	else if (!s->burst_ctrl.fallback_mode && s->in_fallback) {
-		s->in_fallback = 0;
-		s->gcc_target_bitrate_bps = 0;
+	} else if (interval_count > 0) {
+		camel_sender_warn(s, "UNTRUSTED_GROUP_INTERVALS", "ignoring untrusted group interval feedback for burst control");
 	}
 
 	memset(&s->group_feedback[idx], 0, sizeof(s->group_feedback[idx]));
@@ -842,7 +861,10 @@ void camel_sender_heartbeat(camel_sender_t* s, int64_t now_ts_ms)
 	uint32_t camel_target_bps = 0;
 	int notify_camel = 0;
 	camel_bitrate_changed_func notify_cb = NULL;
+	camel_app_layer_predict_func app_cb = NULL;
 	void* notify_trigger = NULL;
+	void* app_trigger = NULL;
+	int32_t app_target_bps = 0;
 
 	if (s == NULL)
 		return;
@@ -885,10 +907,20 @@ void camel_sender_heartbeat(camel_sender_t* s, int64_t now_ts_ms)
 			s->notify_ts_ms = now_ts_ms;
 			notify_cb = s->trigger_cb;
 			notify_trigger = s->trigger;
+			app_cb = s->app_func;
+			app_trigger = s->trigger;
+			app_target_bps = (int32_t)camel_target_bps;
 		}
 		if (s->pacer != NULL)
 			camel_pacer_set_estimate_bitrate(s->pacer, camel_target_bps);
 		camel_sender_unlock(s);
+		if (app_cb != NULL) {
+			double ssim = 0.0;
+			double pssim = 0.0;
+			double size_u = 0.0;
+			double size_sigma2 = 0.0;
+			app_cb(app_trigger, app_target_bps, &ssim, &pssim, &size_u, &size_sigma2);
+		}
 		if (notify_cb != NULL)
 			notify_cb(notify_trigger, camel_target_bps, 0, 0);
 		return;

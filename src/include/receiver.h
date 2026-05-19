@@ -40,6 +40,18 @@ void camel_receiver_on_packet_received(camel_receiver_t* r,
 	size_t payload_size,
 	int is_group_end);
 
+/*
+ * Feed one received packet with its original byte offset in the packet group.
+ * Use this form when loss-aware interval feedback is required.
+ */
+void camel_receiver_on_packet_received_with_offset(camel_receiver_t* r,
+	uint32_t group_id,
+	uint16_t transport_seq,
+	size_t payload_size,
+	uint32_t frame_offset_bytes,
+	uint32_t frame_size_bytes,
+	int is_group_end);
+
 #ifdef __cplusplus
 }
 #endif

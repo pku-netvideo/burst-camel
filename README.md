@@ -158,8 +158,9 @@ int main(void) {
 This implementation is fully packet-level at the public API boundary. A typical integration uses a packet group to represent one video frame (or any application-defined aggregation unit), but the library itself only understands packets and groups.
 
 The sender is designed to work with a wide range of receivers:
-- If the receiver can provide full aggregate group feedback (including per-2KB interval received bytes), CAMEL runs in its strongest mode.
+- If the receiver can provide full aggregate group feedback with per-2KB interval bytes based on original frame offsets, CAMEL runs in its strongest mode.
 - If the receiver only provides ACKs, the sender can synthesize a group sample and approximate interval loss shape from ACK coverage (degraded mode).
+- If a third-party receiver provides compact aggregate group feedback without original frame offsets, keep remote interval feedback untrusted and let the sender use the synthetic interval fallback for burst control.
 
 ### 1) Sender side: record each transmitted packet
 
@@ -182,13 +183,22 @@ For every received packet, call:
 camel_receiver_on_packet_received(receiver, group_id, transport_seq, payload_size, is_group_end);
 ```
 
+For loss-aware burst control, prefer the offset-aware form:
+
+```c
+camel_receiver_on_packet_received_with_offset(receiver, group_id, transport_seq,
+                                             payload_size, frame_offset_bytes,
+                                             frame_size_bytes, is_group_end);
+```
+
 The built-in receiver emits two feedback streams via callbacks:
 - Packet-level ACK samples (`packet_ack_cb`) as `camel_transport_feedback_msg_t`
 - Group-level aggregate feedback (`group_feedback_cb`) as `camel_group_feedback_msg_t` when `is_group_end=1`
 
 If you use a different receiver implementation, you may provide:
 - ACK only (any of the supported ACK formats), and skip group feedback entirely
-- ACK + group feedback (best)
+- ACK + offset-correct group feedback (best)
+- ACK + compact group feedback (usable for bandwidth/delay, not trusted for burst control by default)
 
 ### 3) Sender side: consume ACK and aggregate feedback
 
@@ -343,6 +353,7 @@ cfg.congestion_window_by_samples = 0;
 cfg.congestion_window_value = 5000;
 cfg.min_delay_window_by_samples = 0;
 cfg.min_delay_window_value = 5000;
+cfg.trust_remote_interval_feedback = 0;
 camel_sender_set_config(sender, &cfg);
 ```
 

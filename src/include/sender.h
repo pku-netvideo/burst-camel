@@ -31,6 +31,7 @@ typedef struct
 	uint32_t congestion_window_value;
 	int min_delay_window_by_samples;
 	uint32_t min_delay_window_value;
+	int trust_remote_interval_feedback;
 } camel_sender_config_t;
 
 typedef struct

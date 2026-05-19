@@ -206,7 +206,50 @@ int test_sender_synthetic(void)
 		camel_group_feedback_msg_encode(&strm, &gfb);
 		camel_sender_on_group_feedback(sender, strm.data, (int)strm.used);
 
-		FCC_EXPECT_TRUE("burst decreases when interval 2 has excess loss",
+		FCC_EXPECT_EQ("untrusted remote interval feedback does not affect burst",
+			camel_sender_get_burst_bytes(sender), initial_burst);
+
+		camel_bin_stream_destroy(&strm);
+	}
+
+	camel_sender_destroy(sender);
+
+	memset(&capture, 0, sizeof(capture));
+	sender = camel_sender_create(&capture, test_bitrate_changed, NULL, test_pace_send, 0, 0, test_app_predict);
+	{
+		camel_sender_config_t cfg;
+		memset(&cfg, 0, sizeof(cfg));
+		cfg.enable_warnings = 1;
+		cfg.enable_synthetic_group_feedback = 1;
+		cfg.enable_synthetic_interval_shape = 1;
+		cfg.group_idle_timeout_ms = 50;
+		cfg.congestion_window_by_samples = 0;
+		cfg.congestion_window_value = 5000;
+		cfg.min_delay_window_by_samples = 0;
+		cfg.min_delay_window_value = 5000;
+		cfg.trust_remote_interval_feedback = 1;
+		camel_sender_set_config(sender, &cfg);
+
+		size_t initial_burst = camel_sender_get_burst_bytes(sender);
+		camel_sender_on_packet_sent(sender, 21, 210, 1000, 0);
+		camel_sender_on_packet_sent(sender, 21, 211, 2000, 0);
+		camel_sender_on_packet_sent(sender, 21, 212, 2000, 1);
+		camel_bin_stream_init(&strm);
+		memset(&gfb, 0, sizeof(gfb));
+		gfb.group_id = 21;
+		gfb.group_size_bytes = 3000;
+		gfb.packet_count = 3;
+		gfb.first_packet_size = 1000;
+		gfb.first_recv_ts_us = 0;
+		gfb.last_recv_ts_us = 4000;
+		gfb.interval_count = 3;
+		gfb.interval_received_bytes[0] = 2048;
+		gfb.interval_received_bytes[1] = 952;
+		gfb.interval_received_bytes[2] = 0;
+		camel_group_feedback_msg_encode(&strm, &gfb);
+		camel_sender_on_group_feedback(sender, strm.data, (int)strm.used);
+
+		FCC_EXPECT_TRUE("trusted remote interval feedback can decrease burst",
 			camel_sender_get_burst_bytes(sender) < initial_burst);
 
 		camel_bin_stream_destroy(&strm);

@@ -34,6 +34,7 @@ typedef struct
 {
 	uint16_t transport_seq;
 	uint32_t payload_size;
+	uint32_t frame_offset_bytes;
 	uint64_t recv_ts_us;
 } camel_receiver_packet_t;
 
@@ -50,6 +51,8 @@ struct camel_receiver_t
 	uint32_t packet_count;
 	uint64_t first_recv_ts_us;
 	uint64_t last_recv_ts_us;
+	uint32_t next_compact_offset_bytes;
+	uint32_t original_group_size_bytes;
 };
 
 static int camel_receiver_packet_seq_comp(const void* a, const void* b)
@@ -69,6 +72,8 @@ static void camel_receiver_reset_group(camel_receiver_t* r, uint32_t group_id)
 	r->packet_count = 0;
 	r->first_recv_ts_us = 0;
 	r->last_recv_ts_us = 0;
+	r->next_compact_offset_bytes = 0;
+	r->original_group_size_bytes = 0;
 }
 
 static void camel_receiver_send_packet_ack(camel_receiver_t* r, uint16_t transport_seq, uint64_t recv_ts_us)
@@ -106,10 +111,15 @@ static void camel_receiver_emit_group_feedback(camel_receiver_t* r)
 	msg.first_recv_ts_us = sorted[0].recv_ts_us;
 	msg.last_recv_ts_us = sorted[count - 1].recv_ts_us;
 
-	uint64_t offset = 0;
+	uint32_t group_size_bytes = r->original_group_size_bytes;
+	uint32_t max_received_end = 0;
 	msg.first_packet_size = sorted[0].payload_size;
 	for (uint32_t i = 0; i < count; i++) {
 		uint32_t size = sorted[i].payload_size;
+		uint64_t offset = sorted[i].frame_offset_bytes;
+		uint64_t packet_end = offset + size;
+		if (packet_end > max_received_end)
+			max_received_end = (uint32_t)packet_end;
 		while (size > 0) {
 			uint32_t interval = (uint32_t)(offset / CAMEL_BURST_INTERVAL_BYTES);
 			uint64_t interval_end = ((uint64_t)interval + 1) * (uint64_t)CAMEL_BURST_INTERVAL_BYTES;
@@ -126,7 +136,14 @@ static void camel_receiver_emit_group_feedback(camel_receiver_t* r)
 			size -= bytes;
 		}
 	}
-	msg.group_size_bytes = (uint32_t)offset;
+	if (group_size_bytes == 0)
+		group_size_bytes = max_received_end;
+	msg.group_size_bytes = group_size_bytes;
+	uint32_t expected_interval_count = (group_size_bytes + CAMEL_BURST_INTERVAL_BYTES - 1U) / CAMEL_BURST_INTERVAL_BYTES;
+	if (expected_interval_count > CAMEL_FEEDBACK_MAX_INTERVALS)
+		expected_interval_count = CAMEL_FEEDBACK_MAX_INTERVALS;
+	if (expected_interval_count > msg.interval_count)
+		msg.interval_count = expected_interval_count;
 
 	camel_group_feedback_msg_encode(&r->strm, &msg);
 	r->group_feedback_cb(r->handler, r->strm.data, (int)r->strm.used);
@@ -154,6 +171,21 @@ void camel_receiver_on_packet_received(camel_receiver_t* r,
 	size_t payload_size,
 	int is_group_end)
 {
+	if (r == NULL)
+		return;
+	uint32_t offset = r->cur_group_id == group_id ? r->next_compact_offset_bytes : 0;
+	camel_receiver_on_packet_received_with_offset(r, group_id, transport_seq, payload_size,
+		offset, 0, is_group_end);
+}
+
+void camel_receiver_on_packet_received_with_offset(camel_receiver_t* r,
+	uint32_t group_id,
+	uint16_t transport_seq,
+	size_t payload_size,
+	uint32_t frame_offset_bytes,
+	uint32_t frame_size_bytes,
+	int is_group_end)
+{
 	uint64_t cur_ts = camel_get_sys_us();
 
 	if (r == NULL)
@@ -171,9 +203,15 @@ void camel_receiver_on_packet_received(camel_receiver_t* r,
 	if (r->packet_count < CAMEL_RECEIVER_MAX_PACKETS) {
 		r->packets[r->packet_count].transport_seq = transport_seq;
 		r->packets[r->packet_count].payload_size = (uint32_t)payload_size;
+		r->packets[r->packet_count].frame_offset_bytes = frame_offset_bytes;
 		r->packets[r->packet_count].recv_ts_us = cur_ts;
 		r->packet_count++;
 	}
+	uint64_t compact_end = (uint64_t)frame_offset_bytes + payload_size;
+	if (compact_end > r->next_compact_offset_bytes)
+		r->next_compact_offset_bytes = (uint32_t)compact_end;
+	if (frame_size_bytes > r->original_group_size_bytes)
+		r->original_group_size_bytes = frame_size_bytes;
 
 	if (r->first_recv_ts_us == 0)
 		r->first_recv_ts_us = cur_ts;

@@ -26,7 +26,10 @@ The receiver emits feedback payloads via callbacks. Your application is responsi
 
 - `camel_receiver_create`
 - `camel_receiver_on_packet_received`
+- `camel_receiver_on_packet_received_with_offset`
 - `camel_receiver_destroy`
+
+Use `camel_receiver_on_packet_received_with_offset` when receiver interval feedback should drive burst control. Third-party compact interval feedback should remain untrusted unless it preserves original frame offsets.
 
 ## Sender (Packet-Level)
 

@@ -62,7 +62,10 @@ consume ACK/group feedback  <----------------------------  emit ACK/group feedba
 #### Sender process (uplink)
 
 ```c
-#include "src/include/camel.h"
+#include <stdint.h>
+#include <stddef.h>
+
+#include "camel.h"
 
 static void on_bitrate_changed(void* user, uint32_t bitrate, uint8_t fraction_loss, uint32_t rtt) {
   (void)user; (void)fraction_loss; (void)rtt;
@@ -70,6 +73,15 @@ static void on_bitrate_changed(void* user, uint32_t bitrate, uint8_t fraction_lo
 
 static void pace_send(void* user, uint32_t packet_id, int retrans, size_t size, int padding) {
   (void)user; (void)packet_id; (void)retrans; (void)size; (void)padding;
+}
+
+static void app_predict_callback(void* user, int32_t target_rate, double* ssim, double* pssim,
+                                 double* size_u, double* size_sigma2) {
+  (void)user; (void)target_rate;
+  if (ssim) *ssim = 0.0;
+  if (pssim) *pssim = 0.0;
+  if (size_u) *size_u = 0.0;
+  if (size_sigma2) *size_sigma2 = 0.0;
 }
 
 static void on_feedback_packet_from_network(camel_sender_t* sender, const uint8_t* payload, int payload_size) {
@@ -80,26 +92,40 @@ static void on_feedback_group_from_network(camel_sender_t* sender, const uint8_t
   camel_sender_on_group_feedback(sender, payload, payload_size);
 }
 
-camel_sender_t* sender = camel_sender_create(user_data, on_bitrate_changed, handler, pace_send, 0, 0, app_predict_callback);
-camel_sender_start(sender);
+int main(void) {
+  void* user_data = NULL;
+  void* handler = NULL;
 
-/* For each outgoing packet, after you put it on the wire. */
-camel_sender_on_packet_sent(sender, group_id, transport_seq, payload_size, is_group_end);
+  camel_sender_t* sender = camel_sender_create(
+    user_data, on_bitrate_changed, handler, pace_send, 0, 0, app_predict_callback);
+  if (sender == NULL)
+    return 1;
 
-/* When feedback payloads arrive from the receiver over your feedback channel. */
-on_feedback_packet_from_network(sender, ack_payload, ack_size);
-on_feedback_group_from_network(sender, group_payload, group_size);
+  (void)camel_sender_start(sender);
 
-camel_sender_stop(sender);
-camel_sender_destroy(sender);
+  uint32_t group_id = 1;
+  uint16_t transport_seq = 1;
+  size_t payload_size = 1200;
+  int is_group_end = 1;
+  camel_sender_on_packet_sent(sender, group_id, transport_seq, payload_size, is_group_end);
+
+  camel_sender_stop(sender);
+  camel_sender_destroy(sender);
+  return 0;
+}
 ```
 
 #### Receiver process (downlink)
 
 ```c
-#include "src/include/camel.h"
+#include <stdint.h>
+#include <stddef.h>
 
-static void send_to_sender_over_feedback_channel(const uint8_t* payload, int payload_size);
+#include "camel.h"
+
+static void send_to_sender_over_feedback_channel(const uint8_t* payload, int payload_size) {
+  (void)payload; (void)payload_size;
+}
 
 static void on_group_feedback(void* handler, const uint8_t* payload, int payload_size) {
   (void)handler;
@@ -111,12 +137,20 @@ static void on_packet_ack(void* handler, const uint8_t* payload, int payload_siz
   send_to_sender_over_feedback_channel(payload, payload_size);
 }
 
-camel_receiver_t* receiver = camel_receiver_create(NULL, on_group_feedback, on_packet_ack);
+int main(void) {
+  camel_receiver_t* receiver = camel_receiver_create(NULL, on_group_feedback, on_packet_ack);
+  if (receiver == NULL)
+    return 1;
 
-/* For each received packet at the receiver. */
-camel_receiver_on_packet_received(receiver, group_id, transport_seq, payload_size, is_group_end);
+  uint32_t group_id = 1;
+  uint16_t transport_seq = 1;
+  size_t payload_size = 1200;
+  int is_group_end = 1;
+  camel_receiver_on_packet_received(receiver, group_id, transport_seq, payload_size, is_group_end);
 
-camel_receiver_destroy(receiver);
+  camel_receiver_destroy(receiver);
+  return 0;
+}
 ```
 
 ## End-to-End Pipeline
@@ -317,6 +351,7 @@ Parameters (in `camel_sender_config_t`):
 ## Clock Semantics
 
 - Bandwidth reconstruction uses receiver-side timestamps carried in packet ACK samples (`recv_ts_us`), but only as a relative span `(t_last - t_first)`.
+- If `recv_ts_us` is not present in ACK samples, the sender falls back to using the ACK arrival time (sender-local) as the receive timestamp domain for bandwidth reconstruction.
 - Delay (first-packet RTT) and fallback controller delay signals use sender-local time. No cross-machine clock synchronization is required.
 
 ## Thread Model
@@ -355,7 +390,7 @@ See `doc/TESTING.md` for detailed testing documentation.
 
 CAMEL-CC implements three key algorithms:
 
-1. **Bandwidth Estimation**: `B = sum(S_i) / (t_recv_n - t_recv_1)`
+1. **Bandwidth Estimation**: `B = sum_{i=2..n}(S_i) / (t_recv_n - t_recv_1)` (exclude the first packet)
 2. **Congestion Detection**: `S(D, inflight) = dD / dinflight`
 3. **Burst Control**: `M_t = M_{t-1} ± 2KB` (based on loss rate)
 
